@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="traffic-token" content="__REQUEST_TOKEN__">
+  <title>Traffic Lab — Image & Video Studio</title>
+  <link rel="stylesheet" href="/styles.css"><script src="/ivp_features.js" defer></script><script src="/app.js" defer></script>
+</head>
+<body data-workbench="lab" data-app-page="full">
+<a class="skip-link" href="#tool-title">Skip to workspace</a>
+<aside class="app-nav" id="app-nav" aria-label="Feature navigation">
+  <a id="app-home-link" class="brand" href="/" aria-label="Traffic Lab home"><span class="brand-mark">tl</span><span>Traffic Lab<small id="app-brand-scope">IVP + AI WORKBENCH</small></span></a>
+  <div class="page-switch" aria-label="Application pages"><a id="ivp-page-link" href="/ivp">Open IVP page <span aria-hidden="true">→</span></a><a id="full-page-link" href="/">Full application <span aria-hidden="true">→</span></a></div>
+  <nav aria-label="Analysis tools">
+    <div class="nav-group"><p>IVP laboratory</p>
+      <button id="ivp-workspace" data-workbench="lab" aria-current="page"><span aria-hidden="true">▧</span>Image laboratory</button>
+      <button id="tracking-workspace" data-workbench="tracking"><span aria-hidden="true">↗</span>Tracking &amp; speed</button>
+      <details id="traffic-review-nav"><summary>More traffic reviews</summary><button id="zebra-workspace" data-workbench="zebra">Zebra occupancy</button><button id="direction-workspace" data-workbench="direction">Direction review</button><button id="red-line-workspace" data-workbench="red_line">Line crossing during red</button><button id="restricted-workspace" data-workbench="restricted_red">Area entry during red</button><button id="speed-review-workspace" data-workbench="speed_review">Calibrated speed review</button><button id="stop-review-workspace" data-workbench="required_stop">Required-stop review</button></details>
+      <button id="markings-workspace" data-workbench="markings"><span aria-hidden="true">≋</span>Road markings</button>
+    </div>
+    <div class="nav-group" data-full-app-only><p>AI workspace <span class="nav-experimental">Experimental</span></p>
+      <button id="ai-workspace" data-workbench="detection"><span aria-hidden="true">⌖</span>Detection &amp; rules</button>
+      <button id="overview-workspace" data-workbench="overview"><span aria-hidden="true">◉</span>Scene overview</button>
+    </div>
+    <div class="nav-group"><p>Saved work</p><button id="history-button" data-workbench="library"><span aria-hidden="true">▤</span>Saved runs</button></div>
+  </nav>
+  <div class="nav-note"><i></i><strong>On this computer</strong><span>Originals preserved.<br>IVP works without AI.</span></div>
+</aside>
+<header class="masthead">
+  <button id="nav-toggle" class="quiet" aria-label="Show feature navigation" aria-controls="app-nav" aria-expanded="false">☰</button>
+  <div class="page-heading"><div id="tool-category" class="eyebrow">IVP LABORATORY</div><h1 id="tool-title" tabindex="-1">Image laboratory</h1><p id="tool-description">Follow each classical image-processing step.</p></div>
+  <span class="local-badge"><i></i> Local processing</span>
+  <button id="open-footage" class="quiet" disabled>Open footage</button>
+</header>
+<section id="guided-start" class="guided-start" hidden aria-label="Start here">
+  <div class="guided-intro"><div class="eyebrow">START HERE</div><h2>What do you want to do?</h2><label for="guided-goal">Choose a task</label><select id="guided-goal"></select><p id="guided-source"></p><div class="guided-actions"><button id="guided-source-change" class="quiet">Choose file or sample</button><button id="guided-example" class="quiet">Try an example</button></div></div>
+  <div class="guided-current"><div id="guided-readiness" role="status" aria-live="polite"></div><button id="guided-next" class="primary">Continue</button><button id="guided-recheck" class="quiet" hidden>Recheck local detector</button><p class="hint">4 · Review the result, inspect its steps, then download. “Unknown” means there was not enough evidence.</p></div>
+</section>
+<section id="guided-error" class="guided-error" hidden role="alert" aria-label="Action needs attention"></section>
+<div id="notification" role="status" aria-live="polite" hidden></div>
+<div id="job-dock" aria-label="Current processing job"></div>
+<main id="workspace" class="studio">
+  <aside class="tools" aria-label="Image processing controls">
+    <details id="source-picker" class="source-picker" open><summary>Source &amp; samples <span class="muted">Originals preserved</span></summary>
+    <label class="upload" id="dropzone"><span class="upload-icon">＋</span><strong>Open traffic footage</strong><small>Drop an image or video, or browse</small><input id="upload" type="file" accept=".jpg,.jpeg,.png,.mp4,.mov,.avi" disabled><span class="formats">JPG · PNG · MP4 · MOV · AVI</span></label>
+    <label class="field-label" for="sample">Or explore a sample</label><select id="sample" disabled><option value="">Choose sample…</option></select>
+    </details><p id="feature-note" class="feature-note">Classical operations, with each stage available to inspect and download.</p>
+    <div id="processing-controls"><div class="section-heading adjustments-heading"><span>PROCESSING</span></div>
+    <label for="processing-mode" class="field-label">How to process</label><select id="processing-mode"><option value="automatic">Automatic IVP (recommended)</option><option value="manual">Manual settings</option></select>
+    <p class="hint">Automatic uses classical image statistics, not an AI model. All IVP stages run without detection or an LLM.</p>
+    <details id="automatic-plan"><summary>Why these settings?</summary><div id="automatic-reasons" class="hint">Open footage to see the selected settings and reasons.</div></details>
+    <div id="manual-settings" hidden><div class="section-heading adjustments-heading"><span>02 / ADJUSTMENTS</span><button id="reset" class="text-button">Reset</button></div>
+    <label class="field-label" for="preset">Starting point</label><select id="preset"></select>
+    <div class="undo-row"><button id="undo" class="quiet" disabled>↶ Undo</button><button id="redo" class="quiet" disabled>↷ Redo</button><span id="settings-label">Original</span></div>
+    <div id="controls"></div>
+    <details class="settings-files"><summary>Save / load adjustments</summary><button id="save-settings" class="quiet">Download settings</button><label class="import-label">Import settings JSON<input id="import-settings" type="file" accept=".json"></label></details>
+    </div><p class="sidebar-note">Enhancement changes appearance. It cannot restore detail absent from the recording.</p></div>
+  </aside>
+  <section class="editor" aria-label="Image workspace">
+    <section id="tracking-empty" class="tracking-empty" hidden aria-labelledby="tracking-empty-title"><div class="eyebrow">VIDEO REQUIRED</div><h2 id="tracking-empty-title">Open a video to track movement</h2><p>A still image cannot provide motion or speed. Open a traffic video, or load the Indian city demo from the tracking controls.</p><button id="tracking-open-video" class="primary" disabled>Open a traffic video</button><small>Your selected image remains available in Image laboratory.</small></section>
+    <div class="editor-heading"><div><div class="eyebrow" id="workspace-label">CLASSICAL IVP · NO AI REQUIRED</div><h2 id="media-name">Open your traffic footage</h2><p id="media-meta">Choose an image, a video or an existing sample.</p></div><span id="preview-state" class="status-chip">Ready</span></div>
+    <p id="example-note" class="feature-note" role="note" hidden></p>
+    <details id="capability-guide" class="capability-guide"><summary>What works, what needs configuration, and what is unsupported</summary>
+      <p>Classical IVP is model-free by default. This page also contains explicitly labelled detector-assisted actions; they run only when clicked. This reference table opens no models or jobs.</p>
+      <div class="capability-table"><table><thead><tr><th>Result</th><th>Method</th><th>Available scope / prerequisites</th></tr></thead><tbody>
+        <tr><td>Enhancement, grayscale, edges, thresholds, connected regions</td><td>Classical IVP</td><td>Implemented for images/video. Stage comparisons show actual processing; regions are unclassified shapes.</td></tr>
+        <tr><td>Paint and line candidates</td><td>Classical IVP</td><td>Implemented appearance survey. Shadows, roofs and reflections remain limitations; candidates cannot configure traffic rules.</td></tr>
+        <tr><td>Foreground motion, optical flow and image speed</td><td>Classical IVP</td><td>Implemented for video with stable camera context. Foreground regions are not confirmed vehicles. Physical km/h requires measured road calibration.</td></tr>
+        <tr><td>Vehicle tracks and zebra occupancy</td><td>Local detector + IVP geometry</td><td>Conditional on installed model. Zebra observations require an explicitly reviewed full band; video needs current registration and repeated observations. Neutral overlap only.</td></tr>
+        <tr><td>Helmet / bare-head observations</td><td>Two local models + geometric association</td><td>Use Helmet observations with verified pinned weights. Missing, weak, tiny, conflicting, clipped or shared evidence stays unknown; does not prove riding.</td></tr>
+        <tr><td>Configured-direction review</td><td>Vehicle tracks + existing motion evaluator</td><td>Implemented video setup here in Tracking & speed: review a first-frame region and expected-travel arrow. Opposite configured movement is a candidate; legal direction is not inferred.</td></tr>
+        <tr><td>Stop, red-context, restricted-zone and speed review</td><td>Vehicle tracks + configured rules</td><td>Existing conditional incident review. Needs applicable reviewed geometry/context; km/h checks need calibration. Configured signal periods are assumptions, not automatic signal recognition.</td></tr>
+        <tr><td>Plate reading, phone/seatbelt checks, general parking/lane legality, automatic legal road context</td><td>Unsupported</td><td>No validated implementation or suitable evidence in this project. No enforcement-grade or crowded-Indian-traffic accuracy claim.</td></tr>
+      </tbody></table></div><p>Choose the relevant task in Start here. Each task keeps its setup, results and downloads together. <a href="/">Open the full application</a> for the separate broad scene/LLM workspace. Detailed prerequisites and limits are in docs/TRAFFIC_CAPABILITIES.md.</p>
+    </details>
+    <section id="ivp-focus" class="ivp-focus">
+      <div class="eyebrow">A RESULT YOU CAN EXPLAIN</div><h2>What should IVP produce?</h2>
+      <div class="ivp-goal-controls"><label for="ivp-goal">Output<select id="ivp-goal"><option value="regions">Connected region map</option><option value="edges">Edge map</option><option value="colour">Colour image</option></select></label><button id="ivp-generate" class="primary" disabled>Process &amp; show steps</button></div>
+      <p id="ivp-demo-status" class="hint" role="status">Choose a result. Its executed steps, before/after images and settings will be saved together.</p>
+      <figure id="ivp-input-preview"><img id="ivp-input" alt="Original input for the selected IVP task"><figcaption>Original input · enhancements and analysis paths remain separate</figcaption></figure>
+      <label class="ivp-explore"><input id="ivp-explore" type="checkbox"> Explore all IVP tools and alternative branches</label>
+    </section>
+    <section id="ivp-demo-result" class="ivp-demonstration" hidden></section>
+    <div class="toolbar"><div class="segmented" aria-label="Preview mode"><button class="active" data-view="stages" aria-pressed="true">IVP stages</button><button data-view="compare" aria-pressed="false">Colour comparison</button><button data-view="processed" aria-pressed="false">Processed</button><button data-view="features" aria-pressed="false">Features</button></div><select id="view-choice" aria-label="Feature or stage" hidden></select><button id="region-tool" class="quiet" aria-pressed="false" disabled>▧ Select region</button><button id="jump-controls" class="quiet compact-nav">Adjustments ↓</button><button id="jump-inspector" class="quiet compact-nav">Inspector ↓</button></div>
+    <div id="stage-navigation" class="stage-navigation" hidden><button id="previous-stage" class="quiet">← Previous</button><strong id="stage-title"></strong><button id="next-stage" class="quiet">Next →</button><a id="download-stage">Download stage ↓</a></div><button id="guided-preview-next" class="quiet" hidden>Continue setup</button>
+    <div id="stage-branches" class="stage-branches" role="group" aria-label="Processing branches" hidden></div>
+
+    <section id="zebra-task" class="zebra-task">
+      <div class="eyebrow">DETECTOR-ASSISTED · NEUTRAL IMAGE-SPACE OBSERVATION</div><h2>Is a vehicle on the zebra crossing?</h2>
+      <p>Mark the entire crossing band, including gaps and paint hidden by vehicles. This uses a vehicle rectangle, not a measured physical footprint. No signal, metres or speed calibration is required.</p>
+      <div class="survey-actions"><button id="zebra-mark" class="quiet" disabled>Mark 4 crossing corners</button><button id="zebra-first" class="quiet" disabled>Go to first video frame</button><button id="zebra-clear" class="quiet">Clear crossing review</button></div>
+      <p id="zebra-status" class="hint" role="status">No reviewed crossing band. Paint masks do not configure this feature.</p>
+      <button id="zebra-review" class="quiet" disabled>I reviewed this full zebra band</button>
+      <div class="survey-actions"><button id="zebra-frame" class="primary" disabled>Check this frame</button><button id="zebra-video" class="quiet" disabled>Track occupancy in video</button></div>
+      <p class="hint">Amber labels say “on zebra crossing”. They are never legal violations. Small touches and uncertain vehicle boxes are withheld. Video requires a band reviewed on the first frame and repeated observations; scene changes invalidate it.</p>
+    </section>
+    <section id="direction-task" class="zebra-task">
+      <div class="eyebrow">DETECTOR-ASSISTED · CONFIGURED DIRECTION</div><h2>Compare movement with an expected direction</h2>
+      <p>On the first frame, mark a road region and draw an arrow in the expected travel direction. This is your explicit assumption; paint proposals never supply it automatically.</p>
+      <div class="survey-actions"><button id="direction-first" class="quiet">Go to first frame</button><button id="direction-mark" class="quiet" disabled>Mark region + travel arrow</button><button id="direction-clear" class="quiet">Clear direction review</button></div>
+      <p id="direction-status" class="hint" role="status">No reviewed direction configuration.</p>
+      <div class="survey-actions"><button id="direction-review" class="quiet" disabled>I reviewed this region and direction</button><button id="direction-run" class="primary" disabled>Review direction in video</button></div>
+      <p class="hint">Uses the existing motion-direction evaluator and local vehicle tracking. “Opposite configured direction” is a review candidate, never an automatically established traffic offence. No speed calibration is needed.</p>
+    </section>
+    <section id="motion-task" class="motion-task">
+      <div class="eyebrow">CLASSICAL VIDEO ANALYTICS</div><h2>Automatic tracking &amp; speed</h2>
+      <p id="motion-intro">Start with classical IVP movement in pixels/second. Vehicle mode is an optional local detector; calibration is optional here.</p>
+      <button id="motion-demo" class="quiet">Load Indian city demo</button>
+      <details id="synthetic-demo"><summary>Four synthetic speed examples</summary>
+        <p class="hint">Rendered test footage with a declared virtual scale. Opening an example only previews it. Setup and processing are separate actions.</p>
+        <label>Example<select id="synthetic-choice"><option value="synthetic-speed-v1/videos/green_cross_18.mp4" selected>18 virtual km/h</option><option value="synthetic-speed-v1/videos/speed_equal_30.mp4">30 virtual km/h</option><option value="synthetic-speed-v1/videos/speed_above_36.mp4">36 virtual km/h</option><option value="synthetic-speed-v1/videos/speed_36_recovery_early.mp4">36 virtual km/h · obstruction recovery</option></select></label>
+        <label>TEST threshold · virtual km/h<input id="synthetic-threshold" type="number" min="1" max="160" step="0.1" value="30"></label>
+        <label class="motion-roi"><input id="synthetic-review" type="checkbox"> Include optional threshold review using vehicle mode</label>
+        <div class="survey-actions"><button id="synthetic-open" class="quiet">Open selected example</button><button id="synthetic-apply" class="quiet" disabled>Apply virtual setup &amp; TEST threshold</button></div>
+        <p id="synthetic-status" class="hint" role="status">TEST values are not verified legal limits. Open a synthetic example, then apply its setup explicitly. Use the separate tracking button when ready.</p>
+      </details>
+      <div id="motion-options" hidden>
+        <section id="speed-limit-controls" class="speed-limit-controls" hidden>
+          <h3>Speed limit · optional display filter</h3>
+          <button id="speed-limit-pixel-link" class="quiet" hidden>Open Tracking &amp; speed · px/s available with calibration off</button>
+          <label class="motion-roi"><input id="speed-limit-enabled" type="checkbox"> Highlight only tracks above the limit</label>
+          <label>Speed limit <span id="speed-limit-unit">· analysis px/s</span><input id="speed-limit-value" type="number" min="0" step="any" placeholder="Enter a positive limit" disabled></label>
+          <p id="speed-limit-status" class="hint" role="status"></p>
+          <p id="speed-limit-space" class="hint"></p>
+          <p class="hint">Strictly above only: equal, below, pending and withheld speeds receive no box or trail. All tracks and measurements remain in the CSV. This is a display preference, not a violation decision. Classical IVP tracks are moving texture regions, not established cars.</p>
+        </section>
+        <p id="motion-method-help" class="hint">Classical IVP runs without models. Vehicle mode uses the installed local detector only when you start a job.</p><div class="motion-controls"><label>Tracking method<select id="motion-mode"><option value="vehicles">Vehicles · local detector + IVP</option><option value="ivp">Moving texture regions · IVP only</option></select></label><label>Result video<select id="motion-view"><option value="tracks">Full-size tracks &amp; speed</option><option value="stages">Four IVP stages together</option></select></label></div>
+        <p id="motion-mode-note" class="hint">Whole-vehicle boxes from the existing local YOLO11s model; ByteTrack identities, IVP camera correction and speed. No LLM. Indian vehicle types are not classified.</p>
+        <div class="motion-controls"><label>Counting line<select id="motion-axis"><option value="horizontal">Horizontal · down / up</option><option value="vertical">Vertical · right / left</option></select></label><label>Line position <output id="motion-line-value">65%</output><input id="motion-position" type="range" min="10" max="90" step="1" value="65"></label></div>
+        <label class="motion-roi"><input id="motion-use-roi" type="checkbox"> Use the selected region (optional)</label>
+        <p id="motion-line-help" class="hint">The amber line is shown on the preview. Analysis starts at frame zero and processes the whole video.</p>
+        <details class="target-setup"><summary>Optional: follow one selected texture patch</summary><p class="hint">Select a tight vehicle box on frame zero. Optical flow follows its texture; the tracker stops if features are lost. This target is separate from the road region and automatic blob counts.</p><button id="target-mark" class="quiet">Select vehicle on first frame</button> <button id="target-demo" class="quiet">Follow the sample bus rear</button> <button id="target-clear" class="quiet">Clear target</button><p id="target-status" class="hint">No selected target. Automatic tracking needs no vehicle selection.</p></details><details class="speed-setup"><summary>Speed measurement · calibrate for km/h</summary>
+<p>Without calibration, speed is measured in analysis pixels/second. For km/h, mark the four corners of a <strong>measured rectangular patch on the flat road</strong>: far-left → far-right → near-right → near-left. Enter its real width and length; do not guess from the video.</p>
+<label class="motion-roi"><input id="speed-enabled" type="checkbox"> Use measured road calibration</label>
+<p id="virtual-dimensions-note" class="virtual-dimensions-note" hidden></p>
+<div class="motion-controls"><label>Width across road (m)<input id="speed-width" type="number" min="0.1" max="1000" step="0.1" placeholder="Measured width"></label><label>Length along road (m)<input id="speed-length" type="number" min="0.1" max="1000" step="0.1" placeholder="Measured length"></label></div>
+<button id="speed-mark" class="quiet">Mark four road corners</button> <button id="speed-clear" class="quiet">Clear calibration</button>
+<p id="speed-status" class="hint">No calibration. Region estimates use px/s.</p><p class="hint">Calibrate the road once for all tracks. Only stable tracks inside the marked patch receive km/h estimates. Use a flat road, a near-fixed camera and real-time footage. Slow-motion or time-lapse footage cannot establish real vehicle speed from playback timestamps.</p></details>
+<details class="incident-setup"><summary>Incident review · optional detector-assisted checks</summary>
+<div id="red-review-steps">
+  <fieldset><legend id="red-geometry-title">1 · Place the geometry</legend>
+    <p id="red-geometry-help"></p>
+    <div class="red-actions"><button id="red-draw" class="primary">Draw on preview</button><button id="red-first" class="quiet">Show first frame</button></div>
+    <p id="red-draw-status" class="hint" role="status"></p>
+    <div id="red-direction"></div>
+    <details><summary>Adjust with numbers instead</summary><p id="red-numeric-help" class="hint">Percentages refer to this frame.</p><div id="red-manual-line" class="red-numeric"></div><div id="red-manual-zone"></div></details>
+    <details class="red-example"><summary>Try a safe synthetic walkthrough</summary><p>Open the existing 12-second test clip, place the example geometry, then inspect the preview. Its original configuration is GREEN. Choosing RED here is an explicit TEST override, not a detected signal or real offence.</p><div class="red-actions"><button id="red-example-open" class="quiet">Open synthetic clip</button><button id="red-example-place" class="quiet" disabled>Place example geometry</button></div><p class="hint">The line is at 65% height; the area spans 15–85% across and 65–78% down. This is test geometry, not an exact road-paint boundary. Placement leaves signal context unknown and review unchecked. It does not run analysis.</p></details>
+  </fieldset>
+  <fieldset><legend>2 · Declare the signal context</legend><p>You supply this information. The app does not detect traffic lights. Unknown is a valid choice; red-dependent conclusions will be withheld.</p><div id="red-condition"></div><div id="red-restriction"></div><details><summary>Signal changes during the clip?</summary><div id="red-timeline"></div><p class="hint">One row per interval: start seconds, end seconds, red / green / unknown. Example: 0, 5, red then 5, 12, green. Intervals replace the whole-clip choice; uncovered times are unknown. Use original video positions.</p></details><p id="red-context-status" class="red-context-status" role="status"></p></fieldset>
+  <fieldset><legend>3 · Inspect and confirm</legend><p>Check the first-frame geometry and the context you supplied. Changing either resets your confirmation. Results are review candidates, not proven violations.</p><div id="red-confirm"></div><p class="hint">No road calibration or vehicle-by-vehicle selection is needed. The existing local detector supplies tracks; IVP handles temporal motion and configured geometry.</p></fieldset>
+</div>
+<p>Review automatic vehicle tracks against rules you configure. A zebra crossing alone is not an offence. Signal conditions are supplied here; the app does not infer them from pixels.</p>
+<label class="motion-roi"><input id="incident-enabled" type="checkbox"> Enable incident review</label><label class="motion-roi"><input id="feature-context-confirmed" type="checkbox"> I reviewed this feature’s geometry and applicable context on this source</label>
+<button id="incident-frame-zero" class="quiet">Show first frame for setup</button>
+<label class="motion-roi"><input id="incident-line" type="checkbox" checked> Review the counting line as a stop boundary</label>
+<div class="motion-controls"><label>Line start (%)<input id="incident-start" type="number" min="0" max="98" value="15"></label><label>Line end (%)<input id="incident-end" type="number" min="2" max="100" value="85"></label></div>
+<label>Crossing direction<select id="incident-direction"><option value="positive">Positive · down / left</option><option value="negative">Negative · up / right</option><option value="both">Both directions</option></select></label>
+<label>Configured condition<select id="incident-condition"><option value="observe">Observe only · no restriction</option><option value="red">Red · this boundary applies to these vehicles</option><option value="green">Green / unrestricted</option><option value="stop_required">Stop required · observed approach</option><option value="unknown">Unknown · withhold conclusion</option></select></label>
+<label>Optional condition timeline<textarea id="incident-intervals" rows="3" placeholder="0, 5, red&#10;5, 12, green"></textarea></label><p class="hint">One interval per line: start seconds, end seconds, condition (red, green, observe, stop_required or unknown). Uncovered times are unknown. Leave blank to use one condition for the whole clip.</p>
+<label class="motion-roi"><input id="incident-zone" type="checkbox"> Observe entry into a crossing zone</label>
+<label>Zone · left, top, right, bottom (%)<input id="incident-zone-rect" value="15, 65, 85, 78"></label>
+<label class="motion-roi"><input id="incident-restricted" type="checkbox"> This zone is explicitly restricted during the configured red condition</label>
+<label>Stop approach · left, top, right, bottom (%)<input id="incident-approach" value="15, 45, 85, 65"></label>
+<p class="hint">Missed-stop review needs an observed entry into this approach and continuous calibrated speed. A stop means at least one second at or below 2 km/h within the approach.</p>
+<label><span id="incident-limit-label">Speed threshold (km/h) · optional</span><input id="incident-limit" type="number" min="1" max="160" placeholder="Leave empty to skip speeding review"></label>
+<p class="hint">A speeding candidate requires at least 0.5 seconds above your threshold plus a conservative review policy guard of 2 km/h or 5% of the threshold, whichever is larger. Borderline estimates are withheld. This is not a legal tolerance or validated measurement-accuracy bound.</p>
+<label class="motion-roi"><input id="incident-calibration-confirmed" type="checkbox"> I confirm the road dimensions and corner placement above</label>
+<label class="motion-roi"><input id="incident-real-time" type="checkbox"> Recording is real-time, with original playback timing</label>
+<label class="motion-roi"><input id="incident-synthetic" type="checkbox"> Synthetic test footage · dimensions are declared virtual scale</label>
+<p id="incident-status" class="hint">Off. Existing tracking and speed analysis are unchanged.</p>
+</details>
+<button id="motion-run" class="primary">Track automatically &amp; calculate speed</button>
+      </div><p id="motion-note" class="hint">Open a video or load the demo. Still images cannot show movement.</p>
+    </section>
+    <details id="survey-task" class="survey-task"><summary>Still-image marking survey · experimental</summary>
+      <div><span class="eyebrow">INDEPENDENT IVP APPLICATION · REVIEW ONLY</span><h2>Survey paint-like road appearance</h2><p>Measure white/yellow candidate coverage, fragment sizes and orientations in a selected patch. Original pixels and classical IVP; no AI model runs. Vehicles and glare can pass. Proposals cannot configure road geometry or incident rules.</p></div>
+      <div class="survey-actions"><button id="survey-select" class="quiet">1 · Select road area</button><button id="survey-run" class="primary" disabled>2 · Measure &amp; save survey</button></div>
+      <p id="survey-status" class="hint" aria-live="polite">Select road only, excluding vehicles and buildings where possible. For video, this surveys the selected frame.</p>
+    </details>
+    <div class="viewport" id="viewport">
+      <div id="empty-state"><div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div><div class="eyebrow">YOUR FOOTAGE, IN FOCUS</div><h2>From pixels to edges and shapes.</h2><p>Grayscale → smoothing → contrast → edges.<br>Then explore thresholds, morphology, shapes and colour masks.</p><button id="try-sample" class="primary">Explore a street sample <span>→</span></button><small>Runs on your computer. No cloud inference.</small></div>
+      <div id="frame" tabindex="0" hidden><img id="base-image" alt="Processed traffic frame" draggable="false"><img id="before-image" alt="Original traffic frame" draggable="false"><div id="wipe-line"></div><div id="region-box" hidden></div><svg id="zebra-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Reviewed crossing band"></svg><svg id="direction-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Reviewed direction region and arrow"></svg><div id="target-box" hidden></div><div id="motion-count-line" hidden></div><svg id="speed-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Measured road calibration"></svg><div class="image-label left" id="original-label">ORIGINAL</div><div class="image-label right" id="processed-label">PROCESSED</div></div>
+    </div>
+    <div id="compare-control" class="compare-control" hidden><span>Original</span><input id="wipe" type="range" min="0" max="100" value="50" aria-label="Before and after divider"><span>Processed</span></div>
+    <div id="video-timeline" class="timeline" hidden><label for="timestamp">Preview position</label><input id="timestamp" type="range" min="0" value="0" step="0.01" aria-describedby="timeline-hint"><output id="time-label">0.00 s</output><p id="timeline-hint" class="hint">Position in the video, in seconds. Changes the preview only; tracking processes the full clip from the start.</p></div>
+    <details id="source-playback" class="source-playback" hidden><summary>Play original local video</summary><p class="hint">Original playback only. Preview position selects a frame separately. Playing does not start analysis.</p><video id="source-video" controls playsinline muted preload="metadata" aria-label="Original local video playback"></video></details>
+    <div class="concept" id="concept"><span class="concept-icon">i</span><p id="concept-text">The original stays intact. Adjustments apply to a separate colour pipeline; feature views let you examine individual IVP operations.</p></div>
+    <section id="motion-result" class="motion-result" hidden aria-live="polite"></section>
+    <section id="survey-result" class="survey-result" hidden aria-live="polite"></section>
+    <section id="ivp-board" hidden><h2 id="stage-board-title">The IVP pipeline</h2><p class="hint">Each card names its input. Choose a branch above, or use Previous / Next to visit every stage.</p><div id="stage-cards"></div></section>
+    <div class="export-bar"><div><strong>Keep your work</strong><small id="export-note">Export the processed frame, masks, and a reproducible report.</small></div><button id="export-frame" class="primary" disabled>Export image <span>↓</span></button><button id="export-video" class="quiet" hidden>Export colour video</button></div>
+    <details id="mask-options"><summary>Feature masks to include in exports</summary><div id="mask-list" class="mask-list"></div></details>
+    <section id="frame-export-result" class="job-card" hidden aria-live="polite"></section>
+    <section id="active-job" class="job-card" hidden aria-live="polite"><div class="row"><strong id="job-title">Processing</strong><button id="cancel-job" class="text-button">Cancel</button><button id="view-job-result" class="quiet" hidden>Open result</button><button id="dismiss-job" class="quiet" aria-label="Dismiss finished job" hidden>Dismiss</button></div><progress id="job-progress" aria-label="Video processing progress" max="1" value="0"></progress><p id="job-message"></p><details id="job-output-options" hidden><summary>Run downloads</summary><div id="job-downloads" class="downloads"></div></details></section>
+  </section>
+  <aside class="inspector" aria-label="Frame inspector">
+    <details id="measurements-disclosure"><summary>Quality &amp; region measurements</summary>
+    <div class="section-heading"><span>03 / INSPECT</span><span class="muted">Measured, not guessed</span></div>
+    <div class="inspector-tabs"><button data-inspect="quality" class="active">Quality</button><button data-inspect="region">Region</button></div>
+    <section id="quality-panel"><h2>Colour-output health</h2><p class="hint">These metrics compare the original and colour export. The selected grayscale or edge stage is a separate analysis view.</p><div id="quality-stats" class="stats"><p class="hint">Measurements appear after opening footage.</p></div><h3>Luminance distribution</h3><svg id="histogram" viewBox="0 0 256 100" role="img" aria-label="Original and processed luminance histogram"></svg><div class="legend"><span class="original-dot">Original</span><span class="processed-dot">Processed</span></div><div id="quality-hints" class="quality-hints"></div><p class="hint footnote">Detail and entropy depend on scene content. Higher values alone do not mean better quality.</p></section>
+    <section id="region-panel" hidden><h2>Region inspector</h2><p class="hint">Choose Select region, then drag over the image. Measurements use the same area before and after processing.</p><div id="region-stats"><p class="hint">No region selected.</p></div><button id="clear-region" class="quiet">Clear selection</button><p class="hint footnote">This is an IVP inspection region. It does not define a traffic-rule zone.</p></section>
+    <section id="ai-panel" hidden><h2>Local intelligence</h2><p class="hint">Two tools, different jobs.</p><article class="ai-option"><span class="tag">DETECTION</span><h3>Road users & rule evidence</h3><p>Find objects and evaluate available evidence. Motion checks require video.</p><button id="analyse" class="primary" disabled>Run detection</button></article><article class="ai-option"><span class="tag">OPTIONAL LOCAL OVERVIEW</span><h3>Visible feature categories</h3><p>Qwen3-VL checks the original frame on this computer using the existing CPU runtime. Simple controls took 33–40 seconds; startup is limited to 30 seconds and inference to 60. You can continue IVP work while it runs.</p><p class="hint">A small, unverified category overview. No text reading, positions, speeds or traffic-rule decisions are produced.</p><button id="review" class="quiet" disabled>Review frame</button><button id="review-cancel" class="quiet" hidden>Cancel overview</button><p id="review-status" class="hint" role="status"></p><div id="review-output" aria-live="polite"></div></article><p class="hint footnote">Experimental: cyan boxes are detections; green boxes are reported events. Model categories and unresolved scene context require visual review.</p></section>
+    </details>
+  </aside>
+</main>
+<main id="library" class="library" hidden><div class="library-heading"><div class="eyebrow">YOUR WORK</div><h1>Saved runs</h1><p>Processing records, results, and the settings behind them.</p><button id="back-workspace" class="quiet">← Back to workspace</button></div><div class="library-filters"><input id="run-search" type="search" placeholder="Search source filename or run ID" aria-label="Search saved runs"><select id="run-filter" aria-label="Run status"><option value="">All statuses</option><option>complete</option><option>running</option><option>queued</option><option>encoding</option><option>failed</option><option>cancelled</option><option>interrupted</option></select><button id="refresh-runs" class="quiet">Refresh</button></div><p id="library-summary" class="hint" role="status"></p><div id="runs"></div><button id="library-more" class="quiet" hidden>Load older results</button></main>
+<dialog id="result-dialog"><div class="row"><h2 id="result-title">Saved result</h2><button id="close-result" class="quiet" aria-label="Close result">Close ×</button></div><div id="result-body"></div></dialog>
+<section id="course-units" class="course-units" aria-label="Course units and topics for this feature"></section>
+<footer><span>TRAFFIC LAB <b>/</b> <span id="app-footer-scope">IVP + AI</span></span><span>Original → Enhance → Extract → Inspect → Export</span><span>Localhost · <span id="connection">Connecting</span></span></footer>
+</body></html>

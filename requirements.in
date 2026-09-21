@@ -1,0 +1,6 @@
+streamlit>=1.45,<2
+opencv-python-headless>=4.11,<5
+numpy>=2,<3
+pillow>=11,<13
+av>=14,<18
+pytest>=8,<10
