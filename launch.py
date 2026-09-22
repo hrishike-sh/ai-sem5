@@ -13,13 +13,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-URL = "http://127.0.0.1:8511"
+URL = "http://127.0.0.1:8521"
 
 
 def healthy():
     try:
         with urllib.request.urlopen(URL + "/api/health", timeout=1) as response:
-            return response.status == 200 and json.load(response).get("app") == "traffic-lab-web"
+            return response.status == 200 and json.load(response).get("app") == "ai-sem5-web"
     except (OSError, ValueError):
         return False
 
@@ -91,14 +91,14 @@ def _cleanup_failed_start(process):
 def _ensure_server():
     if not healthy():
         with socket.socket() as sock:
-            if sock.connect_ex(("127.0.0.1", 8511)) == 0:
-                raise SystemExit("Port 8511 is occupied by another service. Close it before starting Traffic Lab.")
+            if sock.connect_ex(("127.0.0.1", 8521)) == 0:
+                raise SystemExit("Port 8521 is occupied by another service. Close it before starting Traffic Lab.")
         (ROOT / "temp").mkdir(exist_ok=True)
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
         process = None
         try:
             with (ROOT / "temp" / "server.log").open("ab") as log:
-                process = subprocess.Popen([sys.executable, str(ROOT / "web_server.py"), "--port", "8511"],
+                process = subprocess.Popen([sys.executable, str(ROOT / "web_server.py"), "--port", "8521"],
                                            cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, **options)
             (ROOT / "temp" / "server.json").write_text(json.dumps({"pid": process.pid, "url": URL}), encoding="utf-8")
             for _ in range(120):

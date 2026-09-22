@@ -21,7 +21,7 @@ def verified_local_models(helmet=True):
     for key,path in paths.items():
         expected,size=PINS[key]
         if not path.is_file():
-            raise RuntimeError(f'{key} model unavailable locally. Supply the documented pinned weights (docs/TRAFFIC_CAPABILITIES.md); Setup-AI installs dependencies only. No download was attempted.')
+            raise RuntimeError(f'{key} model unavailable locally. Supply the documented pinned weights (README.md); Setup-AI installs dependencies only. No download was attempted.')
         with path.open('rb') as stream:
             actual=hashlib.file_digest(stream,'sha256').hexdigest()
         if path.stat().st_size!=size or actual!=expected:

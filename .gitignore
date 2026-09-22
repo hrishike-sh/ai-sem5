@@ -29,3 +29,11 @@ demo/results/**/process.json
 demo/results/**/request.json
 
 /demo/india-*.mp4
+
+.ruff_cache/
+validation/
+demo/
+*.mp4
+*.mov
+*.avi
+*.gguf

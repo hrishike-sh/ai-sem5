@@ -64,7 +64,7 @@ def test_real_upload_preview_region_and_export(server):
 
 
 def test_request_boundaries_and_corrupt_file(server):
-    assert request(server, '/api/health')['app'] == 'traffic-lab-web'
+    assert request(server, '/api/health')['app'] == 'ai-sem5-web'
     for route, kwargs, code in [
         ('/api/preview', {'data':{},'token':False}, 403),
         ('/api/config', {'host':'attacker.example'}, 403),
@@ -277,7 +277,7 @@ def test_interrupted_and_corrupt_video_uploads_allow_a_clean_retry(server, sourc
         assert 'H.264' in json.load(error.value)['error']
     assert not server.lab.media
     assert not list((web_server.ROOT/'uploads').rglob('*.*')), 'Rejected upload copies leaked'
-    assert request(server, '/api/health')['app'] == 'traffic-lab-web'
+    assert request(server, '/api/health')['app'] == 'ai-sem5-web'
 
     media = request(server, '/api/upload?name=retry.mp4', raw=source.read_bytes())
     payload = {'media':media['id'], 'settings':{}, 'timestamp':0}

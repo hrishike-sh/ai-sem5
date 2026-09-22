@@ -124,7 +124,7 @@ def test_healthy_server_is_reused_without_overwriting_its_pid(launcher, monkeypa
     folder = launcher / "temp"
     folder.mkdir()
     saved = folder / "server.json"
-    original = b'{"pid": 4000, "url": "http://127.0.0.1:8511"}'
+    original = b'{"pid": 4000, "url": "http://127.0.0.1:8521"}'
     saved.write_bytes(original)
     monkeypatch.setattr(launch, "healthy", lambda: True)
 

@@ -595,16 +595,16 @@ const workbenchTasks={
  required_stop:{title:'Required-stop review',category:'IVP · CONFIGURED VIDEO REVIEW',description:'Review an observed approach and finite stop boundary with calibrated motion.',note:'Only this approach/stop context is submitted; incomplete evidence stays withheld.'},
  markings:{title:'Road markings',category:'IVP LABORATORY',description:'Inspect and measure candidate markings in a road patch.',note:'An independent IVP application. Uses original pixels and classical segmentation, without an AI model. Candidates need visual review.'},
  detection:{title:'Detection & rules',category:'AI WORKSPACE · EXPERIMENTAL',description:'Inspect detections and the evidence behind rule assessments.',note:'Cyan boxes identify detections. Green boxes mark reported events. Unknown scene context stays “cannot assess”.'},
- overview:{title:'Scene overview',category:'AI WORKSPACE · EXPERIMENTAL',description:'A local category overview of the original frame.',note:'An optional local vision model. It does not measure positions, speed or traffic-rule decisions. Continue IVP work while it runs.'},
+ overview:{title:'Scene overview',category:'AI WORKSPACE · EXPERIMENTAL',description:'A local category overview of the original frame.',note:'An optional local vision model. It does not measure positions, speed or traffic-rule decisions. Continue detection work while it runs.'},
  library:{title:'Saved runs',category:'SAVED WORK',description:'Reopen results, inspect evidence and download your work.'}
 };
-let workbenchTask='lab',lastWorkbenchTask='lab',workbenchSource=null,runOpenRevision=0;
-const lastWorkbenchByPage={full:'lab',ivp:'lab'};
+let workbenchTask='detection',lastWorkbenchTask='detection',workbenchSource=null,runOpenRevision=0;
+const lastWorkbenchByPage={full:'detection',ivp:'detection'};
 let fullAppRestorePromise=null;
 
-function ivpPage(){return document.body.dataset.appPage==='ivp';}
-function workbenchStorageKey(){return ivpPage()?'traffic-lab-ivp-tool':'traffic-lab-tool';}
-function savedWorkbench(){try{return localStorage.getItem(workbenchStorageKey())||'lab';}catch{return 'lab';}}
+function ivpPage(){return false;}
+function workbenchStorageKey(){return 'ai-sem5-tool';}
+function savedWorkbench(){try{return localStorage.getItem(workbenchStorageKey())||'detection';}catch{return 'detection';}}
 async function restoreFullAppTools(){
  if(ivpPage()||fullAppRestorePromise)return fullAppRestorePromise;
  fullAppRestorePromise=(async()=>{
@@ -615,11 +615,11 @@ async function restoreFullAppTools(){
  if(ivpPage())fullAppRestorePromise=null;
 }
 function syncPageAppearance(){
- const dedicated=/^\/ivp\/?$/.test(window.location.pathname);
+ const dedicated=false;
  document.body.dataset.appPage=dedicated?'ivp':'full';
- document.title=dedicated?'Traffic Lab — IVP Laboratory':'Traffic Lab — Image & Video Studio';
- $('app-brand-scope').textContent=dedicated?'IVP LABORATORY':'IVP + AI WORKBENCH';
- $('app-footer-scope').textContent=dedicated?'IVP':'IVP + AI';
+ document.title='AI Sem 5 - Traffic Analysis';
+ $('app-brand-scope').textContent='TRAFFIC AI';
+ $('app-footer-scope').textContent='AI';
 }
 function applyPageRoute(focus=false){
  syncPageAppearance();
@@ -627,7 +627,7 @@ function applyPageRoute(focus=false){
  if(!workspaceRestoring&&!ivpPage())restoreFullAppTools();
 }
 function navigatePage(path){
- if(!['/','/ivp'].includes(path)||window.location.pathname===path)return;
+ if(!['/','/ai'].includes(path)||window.location.pathname===path)return;
  $('result-dialog').close();
  window.history.pushState(null,'',path);applyPageRoute(true);
 }
@@ -643,7 +643,7 @@ function setupPageNavigation(){
 function selectWorkbench(requested,focus=false){
  runOpenRevision++;
  $('source-video')?.pause?.();
- const known=Object.hasOwn(workbenchTasks,requested)?requested:'lab';
+ const known=['detection','overview','library'].includes(requested)?requested:'detection';
  const task=ivpPage()&&!['lab','tracking','zebra','direction','red_line','restricted_red','speed_review','required_stop','markings','library'].includes(known)?'lab':known;
  const page=ivpPage()?'ivp':'full';
  workbenchTask=task;document.body.dataset.workbench=task;

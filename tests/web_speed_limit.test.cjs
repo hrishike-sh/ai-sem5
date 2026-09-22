@@ -53,16 +53,3 @@ test('calibrated candidate review remains available with filter off on the old s
  node('speed-limit-enabled').checked=false;node('speed-limit-enabled').change();assert.equal(JSON.stringify(c.scopedTrafficRequest(c.state.media)),JSON.stringify(original));
  c.state.config.speed_display_v1=true;enable('18');const both=c.scopedTrafficRequest(c.state.media);assert.equal(both.incidents.speed_limit_kmh,35);assert.equal(both.speed_display.limit,18);assert.equal(both.speed_display.unit,'km/h');
 });
-
-test('returning from incomplete calibrated review refreshes tracking readiness without bypassing blockers',()=>{
- const app=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
- for(const scenario of ['ready','pending','rendering','no preview','still image','detector missing']){
-  const nodes=new Map(),node=id=>{if(!nodes.has(id))nodes.set(id,{disabled:id==='motion-run',value:id==='motion-mode'?'vehicles':'',hidden:false,setAttribute(){},focus(){},querySelector(){return {pause(){}};}});return nodes.get(id);};
-  const state={media:{kind:scenario==='still image'?'image':'video'},preview:scenario==='no preview'?null:{timestamp:0},pending:scenario==='pending',rendering:scenario==='rendering',config:{vehicle_tracking_ready:scenario!=='detector missing'}};
-  const c=vm.createContext({$:node,state,workbenchTask:'speed_review',workbenchTasks:{tracking:{},speed_review:{}},runOpenRevision:0,lastWorkbenchTask:'speed_review',lastWorkbenchByPage:{ivp:'speed_review'},startingMotion:false,
-   IVP_INCIDENT_FEATURES:['speed_review'],ivpPage:()=>true,workbenchStorageKey:()=>'',document:{body:{dataset:{},classList:{remove(){}}},querySelectorAll:()=>[]},localStorage:{setItem(){}},setArea(){},paint(){},paintWorkbench(){},paintTrackingSource(){},configureFeatureLayout(){},api(){throw Error('Navigation must not start processing');}});
-  vm.runInContext(app.slice(app.indexOf('function motionActions('),app.indexOf('function paintMotionLine(')),c);
-  vm.runInContext(app.slice(app.indexOf('function selectWorkbench('),app.indexOf('function paintTrackingSource(')),c);
-  c.selectWorkbench('tracking');assert.equal(node('motion-run').disabled,scenario!=='ready',scenario);
- }
-});

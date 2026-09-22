@@ -570,7 +570,7 @@ class Lab:
         raise ValueError("Unknown operation.")
 
 
-def create_server(port=8511):
+def create_server(port=8521):
     lab = Lab()
 
     class Handler(BaseHTTPRequestHandler):
@@ -620,7 +620,7 @@ def create_server(port=8511):
             route, query = parsed.path, parse_qs(parsed.query)
             try:
                 if route == "/api/health":
-                    return self.respond({"app": "traffic-lab-web", "version": 1})
+                    return self.respond({"app": "ai-sem5-web", "version": 1})
                 if route == "/api/config":
                     from traffic_ai.runtime import runtime_root, python_path
                     from traffic_ai.local_models import helmet_availability
@@ -647,14 +647,11 @@ def create_server(port=8511):
                                                                query.get('cursor',[None])[0],query.get('status',['all'])[0]))
                 if route == "/api/review":
                     return self.respond(lab.scene_reviews.get(query.get('id', [None])[0]))
-                static = {"/": "index.html", "/ivp": "index.html", "/ivp/": "index.html", "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
+                static = {"/": "index.html", "/ai": "index.html", "/ai/": "index.html", "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
                 if route not in static:
                     return self.respond({"error": "Not found"}, 404)
                 path = WEB / static[route]
                 body = path.read_bytes().replace(b"__REQUEST_TOKEN__", lab.token.encode())
-                if route in ("/ivp", "/ivp/"):
-                    body = body.replace(b'data-app-page="full"', b'data-app-page="ivp"')
-                    body = body.replace(b'Traffic Lab \xe2\x80\x94 Image & Video Studio', b'Traffic Lab \xe2\x80\x94 IVP Laboratory')
                 self.send_response(200)
                 self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "text/plain")
                 self.send_header("Content-Length", str(len(body)))
@@ -735,7 +732,7 @@ def create_server(port=8511):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8511)
+    parser.add_argument("--port", type=int, default=8521)
     args = parser.parse_args()
     server = create_server(args.port)
     try:

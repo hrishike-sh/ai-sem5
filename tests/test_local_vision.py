@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 from unittest.mock import patch
 
@@ -5,15 +6,16 @@ import pytest
 
 from traffic_ai.local_vision import validate_observation
 from traffic_ai.ollama_runtime import environment
+from traffic_ai import ollama_runtime
 
 
-def test_runtime_paths_are_scoped_to_h_drive():
+def test_runtime_paths_are_scoped_to_configured_runtime():
     original = os.environ.get('USERPROFILE')
     with patch('pathlib.Path.mkdir'):
         configured = environment()
     for name in ['USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'OLLAMA_MODELS', 'CUDA_CACHE_PATH']:
-        assert configured[name].replace('\\', '/').startswith('H:/CodexStorage/ivp-ai/ollama/')
-    assert configured['OLLAMA_HOST'] == '127.0.0.1:11435'
+        assert Path(configured[name]).is_relative_to(ollama_runtime.ROOT)
+    assert configured['OLLAMA_HOST'] == '127.0.0.1:11445'
     assert configured['OLLAMA_NO_CLOUD'] == '1'
     assert os.environ.get('USERPROFILE') == original
 

@@ -19,29 +19,21 @@ function navigation(){
  return {context,state,get,saved,calls,body,unchanged(){assert.equal(JSON.stringify({media:state.media,preview:state.preview,settings:state.settings,region:state.region,job:state.job,review:state.review,calibration}),original);}};
 }
 
-test('all six feature routes preserve source, calibration, settings and active job/review state without inference',()=>{
+test('AI workspaces preserve source, calibration and active jobs without inference',()=>{
  const h=navigation();
- for(const task of ['lab','tracking','markings','detection','overview','library']){
-  h.context.selectWorkbench(task);h.unchanged();assert.equal(h.body.dataset.workbench,task);assert.equal(h.saved.get('traffic-lab-tool'),task);
+ for(const task of ['detection','overview','library']){
+  h.context.selectWorkbench(task);h.unchanged();assert.equal(h.body.dataset.workbench,task);assert.equal(h.saved.get('ai-sem5-tool'),task);
   assert.equal(h.get('workspace').hidden,task==='library');assert.equal(h.get('library').hidden,task!=='library');
  }
  assert.equal(h.calls.library,1);
 });
 
-test('AI and IVP navigation returns to the requested task without discarding physical calibration or cancelling work',()=>{
- const h=navigation();h.context.selectWorkbench('tracking');assert.equal(h.state.view,'processed');
- h.context.selectWorkbench('overview');assert.equal(h.state.area,'ai');
- h.context.selectWorkbench('lab');assert.equal(h.state.view,'stages');assert.equal(h.state.area,'ivp');h.unchanged();
-});
-
-test('invalid persisted routes fail back to the image laboratory',()=>{
- const h=navigation();for(const value of ['__proto__','constructor','missing',null]){h.context.selectWorkbench(value);assert.equal(h.body.dataset.workbench,'lab');h.unchanged();}
+test('old IVP and invalid preferences return to detection without losing work',()=>{
+ const h=navigation();
+ for(const task of ['lab','tracking','markings','__proto__','constructor','missing',null]){
+  h.context.selectWorkbench(task);assert.equal(h.body.dataset.workbench,'detection');assert.equal(h.state.area,'ai');h.unchanged();
+ }
  assert.equal(h.calls.library,0);
-});
-
-test('leaving tracking pauses its hidden preview while leaving job identity and cancellation state intact',()=>{
- const h=navigation();h.context.selectWorkbench('tracking');assert.equal(h.calls.pauses,0);
- h.context.selectWorkbench('library');assert.equal(h.calls.pauses,1);h.unchanged();
 });
 
 test('tracking hides an incompatible still source without losing IVP work or starting processing',()=>{

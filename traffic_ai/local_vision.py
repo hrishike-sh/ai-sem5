@@ -36,7 +36,7 @@ def review_frame_ollama(rgb, timestamp=0.):
     tags = request('/api/tags').get('models', [])
     model_info = next((item for item in tags if item.get('name') == MODEL), None)
     if model_info is None:
-        raise RuntimeError('Vision model is not downloaded. Run Setup-Ollama.ps1 to download it onto H:.')
+        raise RuntimeError('Vision model is not downloaded. Configure the optional local vision model in TRAFFIC_AI_HOME/ollama.')
     image = Image.fromarray(rgb).convert('RGB')
     original_size = list(image.size)
     image.thumbnail((1280, 1280))

@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+from .runtime import runtime_root
 import secrets
 import socket
 import subprocess
@@ -25,9 +26,9 @@ from PIL import Image
 from .evidence_review import strict_json
 
 
-HOST, PORT = "127.0.0.1", 11437
+HOST, PORT = "127.0.0.1", 11447
 ADAPTER_VERSION = "bounded-vision-v4.1"
-CACHE = Path("H:/CodexStorage/ivp-ai/ollama")
+CACHE = runtime_root() / "ollama"
 FEATURES = {"car": "car", "bus": "bus", "truck": "truck", "motorcycle": "motorcycle",
             "bicycle": "bicycle", "person": "person", "road": "road", "lane_markings": "lane markings",
             "crosswalk": "crossing markings", "sidewalk": "sidewalk", "traffic_sign": "traffic sign",

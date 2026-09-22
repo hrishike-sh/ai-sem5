@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="traffic-token" content="__REQUEST_TOKEN__">
-  <title>Traffic Lab — Image & Video Studio</title>
+  <title>AI Sem 5 - Traffic Analysis</title>
   <link rel="stylesheet" href="/styles.css"><script src="/ivp_features.js" defer></script><script src="/app.js" defer></script>
 </head>
-<body data-workbench="lab" data-app-page="full">
+<body data-workbench="detection" data-app-page="full">
 <a class="skip-link" href="#tool-title">Skip to workspace</a>
 <aside class="app-nav" id="app-nav" aria-label="Feature navigation">
-  <a id="app-home-link" class="brand" href="/" aria-label="Traffic Lab home"><span class="brand-mark">tl</span><span>Traffic Lab<small id="app-brand-scope">IVP + AI WORKBENCH</small></span></a>
-  <div class="page-switch" aria-label="Application pages"><a id="ivp-page-link" href="/ivp">Open IVP page <span aria-hidden="true">→</span></a><a id="full-page-link" href="/">Full application <span aria-hidden="true">→</span></a></div>
+  <a id="app-home-link" class="brand" href="/" aria-label="Traffic Lab home"><span class="brand-mark">tl</span><span>Traffic Lab<small id="app-brand-scope">TRAFFIC AI</small></span></a>
+  <div class="page-switch" hidden aria-label="Application pages"><a id="ivp-page-link" href="/ivp">Open IVP page <span aria-hidden="true">→</span></a><a id="full-page-link" href="/">Full application <span aria-hidden="true">→</span></a></div>
   <nav aria-label="Analysis tools">
-    <div class="nav-group"><p>IVP laboratory</p>
-      <button id="ivp-workspace" data-workbench="lab" aria-current="page"><span aria-hidden="true">▧</span>Image laboratory</button>
+    <div class="nav-group" hidden><p>Shared processing tools</p>
+      <button id="ivp-workspace" data-workbench="detection" aria-current="page"><span aria-hidden="true">▧</span>Image laboratory</button>
       <button id="tracking-workspace" data-workbench="tracking"><span aria-hidden="true">↗</span>Tracking &amp; speed</button>
       <details id="traffic-review-nav"><summary>More traffic reviews</summary><button id="zebra-workspace" data-workbench="zebra">Zebra occupancy</button><button id="direction-workspace" data-workbench="direction">Direction review</button><button id="red-line-workspace" data-workbench="red_line">Line crossing during red</button><button id="restricted-workspace" data-workbench="restricted_red">Area entry during red</button><button id="speed-review-workspace" data-workbench="speed_review">Calibrated speed review</button><button id="stop-review-workspace" data-workbench="required_stop">Required-stop review</button></details>
       <button id="markings-workspace" data-workbench="markings"><span aria-hidden="true">≋</span>Road markings</button>
@@ -24,11 +24,11 @@
     </div>
     <div class="nav-group"><p>Saved work</p><button id="history-button" data-workbench="library"><span aria-hidden="true">▤</span>Saved runs</button></div>
   </nav>
-  <div class="nav-note"><i></i><strong>On this computer</strong><span>Originals preserved.<br>IVP works without AI.</span></div>
+  <div class="nav-note"><i></i><strong>On this computer</strong><span>Originals preserved.<br>Local traffic analysis.</span></div>
 </aside>
 <header class="masthead">
   <button id="nav-toggle" class="quiet" aria-label="Show feature navigation" aria-controls="app-nav" aria-expanded="false">☰</button>
-  <div class="page-heading"><div id="tool-category" class="eyebrow">IVP LABORATORY</div><h1 id="tool-title" tabindex="-1">Image laboratory</h1><p id="tool-description">Follow each classical image-processing step.</p></div>
+  <div class="page-heading"><div id="tool-category" class="eyebrow">AI WORKSPACE</div><h1 id="tool-title" tabindex="-1">Detection &amp; rules</h1><p id="tool-description">Inspect detections and the evidence behind rule assessments.</p></div>
   <span class="local-badge"><i></i> Local processing</span>
   <button id="open-footage" class="quiet" disabled>Open footage</button>
 </header>
@@ -178,7 +178,7 @@
       <p id="survey-status" class="hint" aria-live="polite">Select road only, excluding vehicles and buildings where possible. For video, this surveys the selected frame.</p>
     </details>
     <div class="viewport" id="viewport">
-      <div id="empty-state"><div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div><div class="eyebrow">YOUR FOOTAGE, IN FOCUS</div><h2>From pixels to edges and shapes.</h2><p>Grayscale → smoothing → contrast → edges.<br>Then explore thresholds, morphology, shapes and colour masks.</p><button id="try-sample" class="primary">Explore a street sample <span>→</span></button><small>Runs on your computer. No cloud inference.</small></div>
+      <div id="empty-state"><div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div><div class="eyebrow">TRAFFIC VIOLATION EVIDENCE</div><h2>Inspect what the footage supports.</h2><p>Open an image or video, run detection, then review the recorded assessments.<br>Uncertain scene context stays unresolved.</p><button id="try-sample" class="primary">Explore a street sample <span>→</span></button><small>Runs on your computer. No cloud inference.</small></div>
       <div id="frame" tabindex="0" hidden><img id="base-image" alt="Processed traffic frame" draggable="false"><img id="before-image" alt="Original traffic frame" draggable="false"><div id="wipe-line"></div><div id="region-box" hidden></div><svg id="zebra-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Reviewed crossing band"></svg><svg id="direction-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Reviewed direction region and arrow"></svg><div id="target-box" hidden></div><div id="motion-count-line" hidden></div><svg id="speed-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Measured road calibration"></svg><div class="image-label left" id="original-label">ORIGINAL</div><div class="image-label right" id="processed-label">PROCESSED</div></div>
     </div>
     <div id="compare-control" class="compare-control" hidden><span>Original</span><input id="wipe" type="range" min="0" max="100" value="50" aria-label="Before and after divider"><span>Processed</span></div>
@@ -199,12 +199,12 @@
     <div class="inspector-tabs"><button data-inspect="quality" class="active">Quality</button><button data-inspect="region">Region</button></div>
     <section id="quality-panel"><h2>Colour-output health</h2><p class="hint">These metrics compare the original and colour export. The selected grayscale or edge stage is a separate analysis view.</p><div id="quality-stats" class="stats"><p class="hint">Measurements appear after opening footage.</p></div><h3>Luminance distribution</h3><svg id="histogram" viewBox="0 0 256 100" role="img" aria-label="Original and processed luminance histogram"></svg><div class="legend"><span class="original-dot">Original</span><span class="processed-dot">Processed</span></div><div id="quality-hints" class="quality-hints"></div><p class="hint footnote">Detail and entropy depend on scene content. Higher values alone do not mean better quality.</p></section>
     <section id="region-panel" hidden><h2>Region inspector</h2><p class="hint">Choose Select region, then drag over the image. Measurements use the same area before and after processing.</p><div id="region-stats"><p class="hint">No region selected.</p></div><button id="clear-region" class="quiet">Clear selection</button><p class="hint footnote">This is an IVP inspection region. It does not define a traffic-rule zone.</p></section>
-    <section id="ai-panel" hidden><h2>Local intelligence</h2><p class="hint">Two tools, different jobs.</p><article class="ai-option"><span class="tag">DETECTION</span><h3>Road users & rule evidence</h3><p>Find objects and evaluate available evidence. Motion checks require video.</p><button id="analyse" class="primary" disabled>Run detection</button></article><article class="ai-option"><span class="tag">OPTIONAL LOCAL OVERVIEW</span><h3>Visible feature categories</h3><p>Qwen3-VL checks the original frame on this computer using the existing CPU runtime. Simple controls took 33–40 seconds; startup is limited to 30 seconds and inference to 60. You can continue IVP work while it runs.</p><p class="hint">A small, unverified category overview. No text reading, positions, speeds or traffic-rule decisions are produced.</p><button id="review" class="quiet" disabled>Review frame</button><button id="review-cancel" class="quiet" hidden>Cancel overview</button><p id="review-status" class="hint" role="status"></p><div id="review-output" aria-live="polite"></div></article><p class="hint footnote">Experimental: cyan boxes are detections; green boxes are reported events. Model categories and unresolved scene context require visual review.</p></section>
+    <section id="ai-panel" hidden><h2>Local intelligence</h2><p class="hint">Two tools, different jobs.</p><article class="ai-option"><span class="tag">DETECTION</span><h3>Road users & rule evidence</h3><p>Find objects and evaluate available evidence. Motion checks require video.</p><button id="analyse" class="primary" disabled>Run detection</button></article><article class="ai-option"><span class="tag">OPTIONAL LOCAL OVERVIEW</span><h3>Visible feature categories</h3><p>Qwen3-VL checks the original frame using a separately configured local CPU runtime. Startup is limited to 30 seconds and inference to 60. You can continue detection work while it runs.</p><p class="hint">A small, unverified category overview. No text reading, positions, speeds or traffic-rule decisions are produced.</p><button id="review" class="quiet" disabled>Review frame</button><button id="review-cancel" class="quiet" hidden>Cancel overview</button><p id="review-status" class="hint" role="status"></p><div id="review-output" aria-live="polite"></div></article><p class="hint footnote">Experimental: cyan boxes are detections; green boxes are reported events. Model categories and unresolved scene context require visual review.</p></section>
     </details>
   </aside>
 </main>
 <main id="library" class="library" hidden><div class="library-heading"><div class="eyebrow">YOUR WORK</div><h1>Saved runs</h1><p>Processing records, results, and the settings behind them.</p><button id="back-workspace" class="quiet">← Back to workspace</button></div><div class="library-filters"><input id="run-search" type="search" placeholder="Search source filename or run ID" aria-label="Search saved runs"><select id="run-filter" aria-label="Run status"><option value="">All statuses</option><option>complete</option><option>running</option><option>queued</option><option>encoding</option><option>failed</option><option>cancelled</option><option>interrupted</option></select><button id="refresh-runs" class="quiet">Refresh</button></div><p id="library-summary" class="hint" role="status"></p><div id="runs"></div><button id="library-more" class="quiet" hidden>Load older results</button></main>
 <dialog id="result-dialog"><div class="row"><h2 id="result-title">Saved result</h2><button id="close-result" class="quiet" aria-label="Close result">Close ×</button></div><div id="result-body"></div></dialog>
 <section id="course-units" class="course-units" aria-label="Course units and topics for this feature"></section>
-<footer><span>TRAFFIC LAB <b>/</b> <span id="app-footer-scope">IVP + AI</span></span><span>Original → Enhance → Extract → Inspect → Export</span><span>Localhost · <span id="connection">Connecting</span></span></footer>
+<footer><span>TRAFFIC LAB <b>/</b> <span id="app-footer-scope">AI</span></span><span>Original → Enhance → Extract → Inspect → Export</span><span>Localhost · <span id="connection">Connecting</span></span></footer>
 </body></html>

@@ -1,13 +1,13 @@
 import json
 import os
-from pathlib import Path
+from .runtime import runtime_root
 import subprocess
 import time
 import urllib.error
 import urllib.request
 
-ROOT = Path('H:/CodexStorage/ivp-ai/ollama')
-ENDPOINT = 'http://127.0.0.1:11435'
+ROOT = runtime_root() / "ollama"
+ENDPOINT = 'http://127.0.0.1:11445'
 MODEL = 'qwen3-vl:4b'
 
 
@@ -19,7 +19,7 @@ def environment():
     for name, path in paths.items():
         path.mkdir(parents=True, exist_ok=True)
         env[name] = str(path)
-    env.update(OLLAMA_HOST='127.0.0.1:11435', OLLAMA_NO_CLOUD='1', OLLAMA_NUM_PARALLEL='1',
+    env.update(OLLAMA_HOST='127.0.0.1:11445', OLLAMA_NO_CLOUD='1', OLLAMA_NUM_PARALLEL='1',
                OLLAMA_MAX_LOADED_MODELS='1', OLLAMA_KEEP_ALIVE='0', OLLAMA_CONTEXT_LENGTH='4096')
     return env
 
@@ -38,19 +38,19 @@ def ensure_running():
         pass
     binary = ROOT / 'runtime/ollama.exe'
     if not binary.is_file():
-        raise RuntimeError('Local vision runtime is missing. Run Setup-Ollama.ps1; installation stays on H:.')
+        raise RuntimeError('Local vision runtime is missing. Configure the optional Ollama runtime under TRAFFIC_AI_HOME/ollama.')
     with (ROOT / 'server.log').open('ab') as log:
         process = subprocess.Popen([str(binary), 'serve'], cwd=ROOT, env=environment(),
                                    stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
     (ROOT / 'process.json').write_text(json.dumps({'pid': process.pid, 'executable': str(binary)}))
     for _ in range(50):
         if process.poll() is not None:
-            raise RuntimeError('Ollama could not start; see H:/CodexStorage/ivp-ai/ollama/server.log')
+            raise RuntimeError('Ollama could not start; see the configured runtime server.log')
         try:
             return request('/api/version')
         except (OSError, urllib.error.URLError):
             time.sleep(.2)
-    raise RuntimeError('Ollama startup timed out; inspect its H: server log before retrying.')
+    raise RuntimeError('Ollama startup timed out; inspect its runtime server log before retrying.')
 
 
 def main():
