@@ -14,6 +14,7 @@ Ultralytics/
 .streamlit/secrets.toml
 *.pem
 *.key
+*.dpapi
 *.pt
 *.pth
 *.safetensors

@@ -1,4 +1,8 @@
 altair==6.2.2
+cffi==2.1.1
+cryptography==50.0.2
+pycparser==3.11
+pyjwt[crypto]==2.15.1
 anyio==4.15.1
 attrs==26.1.0
 av==17.1.0
