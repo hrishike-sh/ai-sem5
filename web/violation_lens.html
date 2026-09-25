@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="traffic-token" content="__REQUEST_TOKEN__">
+  <title>ViolationLens · Evidence review</title>
+  <link rel="stylesheet" href="/violation_lens.css">
+  <script src="/violation_lens.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to review workspace</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="ViolationLens home"><span class="brand-icon" aria-hidden="true">V</span>ViolationLens</a>
+    <div class="header-links"><span id="connection" class="connection">Connecting…</span><a href="/studio">Advanced studio ↗</a></div>
+  </header>
+  <main id="workspace">
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">LOCAL TRAFFIC EVIDENCE WORKSPACE</p>
+      <h1 id="page-title">A closer look.<br><span>A considered decision.</span></h1>
+      <p class="lede">Upload a permitted clip, run detection, and review the evidence behind each candidate. Start with helmet and wrong-way observations.</p>
+      <p class="scope">Candidates require human review. They do not establish legal guilt, issue fines, or create external reports.</p>
+    </section>
+    <ol class="steps" aria-label="Review workflow">
+      <li id="step-upload" aria-current="step"><span>01</span> Upload a clip</li>
+      <li id="step-detect"><span>02</span> Run detection</li>
+      <li id="step-review"><span>03</span> Review evidence</li>
+    </ol>
+    <div id="notice" class="notice" role="alert" hidden></div>
+    <section id="setup" class="setup" aria-labelledby="setup-title" hidden>
+      <h2 id="setup-title">Local model setup needed</h2>
+      <p id="setup-message"></p>
+      <p>Model weights are not bundled. Follow the Models section in the project README to install the verified weights in your runtime directory, then restart the server.</p>
+      <button id="recheck" type="button" class="secondary">Recheck setup</button>
+    </section>
+    <div class="workspace-grid">
+      <section class="panel upload-panel" aria-labelledby="upload-title">
+        <p class="eyebrow">01 · SOURCE</p><h2 id="upload-title">Bring your own clip</h2>
+        <label class="file-picker" for="clip"><span class="upload-symbol" aria-hidden="true">↑</span><strong>Choose a local video</strong><span>MP4, MOV or AVI</span><input id="clip" type="file" accept=".mp4,.mov,.avi"></label>
+        <p id="selected-file" class="subtle">No clip selected.</p>
+        <label class="permission"><input id="rights" type="checkbox"> <span>I have permission to use and analyze this clip.</span></label>
+        <button id="upload" type="button" disabled>Upload clip</button>
+        <div id="upload-progress-wrap" hidden><progress id="upload-progress" max="100" value="0" aria-label="Upload progress"></progress><p id="upload-message" role="status"></p><button id="cancel-upload" type="button" class="secondary">Cancel upload</button></div>
+        <p class="hint">The clip goes to this local server. Optional explanations send only the selected card’s structured facts after your explicit consent.</p>
+      </section>
+      <section class="panel detection-panel" aria-labelledby="detection-title">
+        <p class="eyebrow">02 · ANALYSIS</p><h2 id="detection-title">Follow the evidence</h2>
+        <p id="source-name" class="source-name">Your uploaded source will appear here.</p>
+        <p id="detection-help">Detection uses the existing local pipeline. Visibility, camera angle, and missing road context can limit the result.</p>
+        <button id="start" type="button" disabled>Run detection</button>
+        <div id="run-progress-wrap" hidden>
+          <div class="progress-heading"><strong id="run-state"></strong><span id="progress-label"></span></div>
+          <progress id="run-progress" max="100" value="0" aria-label="Detection progress"></progress>
+          <p id="run-message" role="status" aria-live="polite"></p>
+          <div class="actions"><button id="cancel-run" type="button" class="secondary" hidden>Cancel detection</button><button id="refresh-run" type="button" class="secondary">Refresh status</button></div>
+          <p class="hint">You can reload this page and resume the saved run.</p>
+        </div>
+      </section>
+    </div>
+    <section id="review-panel" class="review-panel" aria-labelledby="review-title">
+      <div class="section-heading"><div><p class="eyebrow">03 · HUMAN REVIEW</p><h2 id="review-title">Candidate evidence</h2></div><button id="export-review" class="secondary" type="button" disabled>Export review JSON</button></div>
+      <p id="review-summary" role="status">Complete a detection run or open a saved run to inspect its evidence.</p>
+      <p id="provenance-notice" class="notice" hidden></p>
+      <div class="subscription-panel">
+        <div><strong id="subscription-status">No LLM explanation available</strong><p id="subscription-message">Deterministic evidence remains available without a ChatGPT connection.</p><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage ChatGPT usage ↗</a></div>
+        <button id="connect-chatgpt" type="button" class="secondary">Connect ChatGPT</button>
+        <div id="auth-confirmation" hidden><p>Authorize ViolationLens to use your ChatGPT plan for selected structured evidence. No footage is sent; no paid API fallback.</p><p class="hint">This opens ChatGPT sign-in for a new authorization. Connecting does not send any evidence. You choose whether to explain a card separately.</p><div class="actions"><button id="approve-auth" type="button">Approve and open ChatGPT sign-in</button><button id="dismiss-auth" type="button" class="secondary">Not now</button></div><p id="auth-feedback" role="status"></p></div>
+      </div>
+      <div id="review-tools" class="review-tools" hidden><label for="rule-filter">Show</label><select id="rule-filter"><option value="all">All candidates</option><option value="priority">Helmet &amp; wrong-way</option><option value="unreviewed">Awaiting human review</option></select><button id="refresh-review" class="secondary" type="button">Reload evidence</button></div>
+      <div id="cards" class="cards"></div>
+      <div class="evidence-boundaries"><strong>Read uncertainty as part of the result.</strong><p>A missing detection does not establish no helmet. Stopped traffic does not establish a red signal. A still image cannot establish speed. Missing context remains visible.</p></div>
+    </section>
+    <section class="panel library" aria-labelledby="library-title"><div class="section-heading"><div><p class="eyebrow">SAVED LOCALLY</p><h2 id="library-title">Continue a review</h2></div><button id="reload-library" type="button" class="secondary">Refresh runs</button></div><p id="library-message" role="status">Loading saved runs…</p><div id="saved-runs"></div><button id="more-runs" type="button" class="secondary" hidden>Load more runs</button></section>
+  </main>
+  <footer>ViolationLens <span>Local analysis · Evidence first · Human decisions</span></footer>
+</body>
+</html>
