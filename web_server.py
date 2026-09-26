@@ -1,4 +1,4 @@
-"""Loopback-only Traffic Lab API and static web application. No cloud dependencies."""
+"""Loopback-only traffic evidence app with consent-gated subscription explanations."""
 import argparse
 import csv
 import hashlib
@@ -29,6 +29,10 @@ from ivp.scene_reviews import SceneReviews
 from ivp.ai_assessments import saved_ai_page
 from ivp.examples import examples, identify_example
 from ivp.marking_policy import mask_export_manifest, review_only_policy
+from traffic_ai.violation_review import ViolationReview
+from traffic_ai.violation_llm import SubscriptionExplainer
+from traffic_ai.violation_auth import SubscriptionAuth, AuthError
+from http.cookies import SimpleCookie
 
 WEB = ROOT / "web"
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".mp4", ".mov", ".avi"}
@@ -150,6 +154,7 @@ class Lab:
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.evidence_reviews = EvidenceReviews(ROOT, self.executor, self.files)
         self.scene_reviews = SceneReviews(ROOT, self.executor)
+        self.violation_reviews = ViolationReview(ROOT, self.files)
         self.token = secrets.token_urlsafe(32)
 
     def close(self):
@@ -427,6 +432,25 @@ class Lab:
                 **({'demonstration': demo_view(run, details, self.files)} if status.get('state') == 'complete' and 'ivp_demo' in details else {})}
 
     def post(self, route, data):
+        if route == '/api/violation-decision':
+            return self.violation_reviews.decide(data)
+        if route == '/api/violation-frames':
+            return self.violation_reviews.frames(data)
+        if route == '/api/violation-export':
+            return self.violation_reviews.export(data)
+        if route == '/api/violation-explain':
+            view = self.violation_reviews.view(data.get('id'))
+            if data.get('fingerprint') != view['fingerprint']:
+                raise ValueError('Evidence changed. Reload the review before requesting an explanation.')
+            card = next((item for item in view['cards'] if item['id'] == data.get('card_id')), None)
+            if card is None:
+                raise ValueError('Evidence card was not found.')
+            result = self.violation_explainer.explain(card, consent=data.get('consent') is True)
+            current = self.violation_reviews.view(data.get('id'))
+            if current['fingerprint'] != view['fingerprint'] or next(
+                    (item for item in current['cards'] if item['id'] == card['id']), None) != card:
+                raise ValueError('Saved evidence changed during the explanation. Refresh the review.')
+            return {'run_id': view['run_id'], 'card_id': card['id'], 'fingerprint': view['fingerprint'], **result}
         if route == '/api/helmet':
             path,info=self._source(data)
             stamp=data.get('timestamp',0)
@@ -621,11 +645,38 @@ def create_server(port=8521):
             try:
                 if route == "/api/health":
                     return self.respond({"app": "ai-sem5-web", "version": 1})
+                if route == '/auth/callback':
+                    cookie = SimpleCookie()
+                    outcome = 'failed'
+                    try:
+                        cookie.load(self.headers.get('Cookie', ''))
+                        session = cookie.get('violation-auth')
+                        if len(self.path) > 65536 or any(len(v) != 1 for v in query.values()):
+                            raise ValueError('Invalid sign-in callback.')
+                        with lab.lock:
+                            lab.violation_auth.complete({k: v[0] for k, v in query.items()},
+                                                        session_id=session.value if session else '')
+                        outcome = 'connected'
+                    except (AuthError, ValueError):
+                        pass
+                    self.send_response(303)
+                    self.send_header('Location', '/?signin=' + outcome)
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Referrer-Policy', 'no-referrer')
+                    self.send_header('Set-Cookie', 'violation-auth=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/auth/callback')
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
+                if route == '/api/violation-llm':
+                    return self.respond(lab.violation_explainer.status())
+                if route == '/api/violation-review':
+                    with lab.lock:
+                        return self.respond(lab.violation_reviews.view(query.get('id', [None])[0]))
                 if route == "/api/config":
                     from traffic_ai.runtime import runtime_root, python_path
                     from traffic_ai.local_models import helmet_availability
                     vehicle_ready=python_path().is_file() and (runtime_root()/"models"/"yolo11s.pt").is_file()
-                    return self.respond({"speed_display_v1":True,"vehicle_tracking_ready":vehicle_ready,"helmet":helmet_availability(),"defaults": Settings().to_dict(), "presets": {k: v.to_dict() for k, v in PRESETS.items()},
+                    return self.respond({"evidence_origin":f"http://127.0.0.1:{lab.files.server.server_port}","speed_display_v1":True,"vehicle_tracking_ready":vehicle_ready,"helmet":helmet_availability(),"defaults": Settings().to_dict(), "presets": {k: v.to_dict() for k, v in PRESETS.items()},
                                          "samples": [{"name": k, "label": v} for k, v in SAMPLE_NAMES.items() if sample_path(k).is_file()]})
                 if route == "/api/media":
                     with lab.lock:
@@ -647,7 +698,10 @@ def create_server(port=8521):
                                                                query.get('cursor',[None])[0],query.get('status',['all'])[0]))
                 if route == "/api/review":
                     return self.respond(lab.scene_reviews.get(query.get('id', [None])[0]))
-                static = {"/": "index.html", "/ai": "index.html", "/ai/": "index.html", "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
+                static = {"/": "violation_lens.html", "/ai": "violation_lens.html", "/ai/": "violation_lens.html",
+                          "/studio": "index.html", "/studio/": "index.html",
+                          "/violation_lens.js": "violation_lens.js", "/violation_lens.css": "violation_lens.css",
+                          "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
                 if route not in static:
                     return self.respond({"error": "Not found"}, 404)
                 path = WEB / static[route]
@@ -713,6 +767,22 @@ def create_server(port=8521):
                     data = json.loads(self.rfile.read(length))
                     if not isinstance(data, dict):
                         raise ValueError("Expected a JSON object.")
+                    if parsed.path == '/api/violation-auth/start':
+                        if self.headers.get('Host') != f'127.0.0.1:{self.server.server_port}':
+                            raise ValueError(f'Open http://127.0.0.1:{self.server.server_port}/ before connecting ChatGPT so the callback stays in this browser session.')
+                        session = secrets.token_urlsafe(32)
+                        result = lab.violation_auth.start(approve=data.get('approve') is True, session_id=session)
+                        result = {**result, 'url': result['authorization_url']}
+                        payload = json.dumps(result).encode()
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.send_header('Cache-Control', 'no-store')
+                        self.send_header('X-Content-Type-Options', 'nosniff')
+                        self.send_header('Set-Cookie', f'violation-auth={session}; Max-Age=600; HttpOnly; SameSite=Lax; Path=/auth/callback')
+                        self.send_header('Content-Length', str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
                     result = lab.post(parsed.path, data)
                 self.respond(result)
             except (ValueError, TypeError, OSError, RuntimeError) as exc:
@@ -725,6 +795,8 @@ def create_server(port=8521):
                 lab.lock.release()
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    lab.violation_auth = SubscriptionAuth(callback_uri=f'http://127.0.0.1:{server.server_port}/auth/callback')
+    lab.violation_explainer = SubscriptionExplainer(auth=lab.violation_auth)
     server.daemon_threads = True
     server.lab = lab
     return server

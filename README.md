@@ -1,6 +1,6 @@
-# AI Sem 5
+# ViolationLens · AI Sem 5
 
-Local traffic-image and video analysis. Run detection and rule assessment, inspect saved evidence, or request an optional local scene overview.
+Local traffic evidence review. Upload a clip you have permission to analyze, run the existing detector and tracker, and inspect candidate incidents with their supporting evidence and missing facts.
 
 ## Run
 
@@ -12,6 +12,24 @@ Install Python 3.11, uv, and FFmpeg (both `ffmpeg` and `ffprobe` on PATH). On Wi
 ```
 
 The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It uses its own `uploads/`, `runs/`, and `.ai-runtime/` directories. `TRAFFIC_AI_HOME` can select another dedicated runtime directory. The retained `ivp/` package supplies shared image processing, media handling, jobs and evidence storage.
+
+## Review workflow
+
+1. Upload a permitted MP4, MOV or AVI clip and run detection. Missing model files are shown as setup requirements.
+2. Open timestamped candidate cards, inspect recorded facts and missing context, and load before/during/after frames. Frame timestamps are actual decoded positions; unavailable frames are labeled.
+3. Accept or reject a candidate with an optional note, then export the local review JSON. Human decisions are stored separately from the original algorithm output and are invalidated if that output changes.
+
+The review prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Triple-riding review is deferred. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
+
+The advanced detection and overview interface remains available at `/studio`. Saved results and uploads stay in this repository's local runtime directories.
+
+## Optional ChatGPT plan explanation
+
+The Windows prototype implements the official [Sign in with ChatGPT flow for locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source/sign-in). In the review page, choose **Connect ChatGPT** and explicitly approve opening sign-in to authorize ViolationLens. This creates a separate app grant; it does not reuse Codex or browser credentials. The grant is encrypted with Windows DPAPI under `%LOCALAPPDATA%/ViolationLens/auth`, outside the repository. Installing dependencies or opening the page does not authorize access.
+
+After sign-in, each card has a separate opt-in explanation action. Its canonical evidence labels and values, rule/status, and identifiers are sent; footage, images, reviewer notes and source paths are excluded. The adapter queries models available to that account and accepts only completed structured responses containing supplied IDs. Human-readable output is composed from the saved canonical facts; the model cannot add measurements, change findings or omit missing-fact warnings. This is a constrained explanation aid, not a new vision assessment.
+
+The app uses ChatGPT plan usage and has no paid API fallback. Account eligibility, available models and a live inference request must be verified after authorization. Offline tests use clearly labeled mock grants and responses; they do not demonstrate live access. Usage and limits are managed in [ChatGPT settings](https://chatgpt.com/settings/usage). A failed or incomplete stream produces an error, not a fabricated explanation.
 
 ## Models
 

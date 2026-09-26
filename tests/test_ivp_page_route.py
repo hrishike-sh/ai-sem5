@@ -7,7 +7,7 @@ import pytest
 from tests.test_web_server import server  # Existing isolated server fixture.
 
 
-@pytest.mark.parametrize('route,page', [('/', 'full'), ('/ai', 'full'), ('/ai/', 'full')])
+@pytest.mark.parametrize('route,page', [('/studio', 'full'), ('/studio/', 'full')])
 def test_page_routes_keep_security_absolute_assets_and_request_token(server, route, page):
     with urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}{route}') as response:
         body = response.read().decode()
