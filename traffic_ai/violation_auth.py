@@ -131,10 +131,14 @@ class SubscriptionHTTP:
         except (TimeoutError, urllib.error.URLError, OSError):
             raise AuthError("The subscription service could not be reached or timed out.", "timeout") from None
 
-    def json(self, url, **kwargs):
+    def json(self, url, *, max_bytes=262144, **kwargs):
+        # Model catalogs include substantial capability metadata. Callers must opt
+        # in to a larger bounded body; token/discovery/JWKS defaults stay small.
+        if type(max_bytes) is not int or not 0 < max_bytes <= 4 * 1024 * 1024:
+            raise AuthError("Invalid subscription response size limit.", "invalid_response_limit")
         deadline = time.monotonic() + kwargs.get("timeout", 30)
         with self.open(url, **kwargs) as response:
-            raw = b"".join(read_chunks(response, 262144, deadline))
+            raw = b"".join(read_chunks(response, max_bytes, deadline))
         return strict_json(raw)
 
 

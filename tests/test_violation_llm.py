@@ -36,6 +36,99 @@ def completed(raw):
         "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}]}})
 
 
+def done_message(card):
+    return {"type": "response.output_item.done", "output_index": 0,
+            "item": {"id": "msg_synthetic", "type": "message", "status": "completed", "phase": "final_answer",
+                     "role": "assistant", "content": [{"type": "output_text", "text": json.dumps(selection(card))}]}}
+
+
+def final_event(output=None):
+    return {"type": "response.completed", "response": {"status": "completed", "model": "fixture-model",
+                                                        "output": output if output is not None else []}}
+
+
+@pytest.mark.parametrize("populated_final", [False, True])
+def test_completed_item_replay_with_empty_or_matching_final(card, populated_final):
+    done = done_message(card)
+    stream = b"".join(event(item) for item in [
+        {"type": "response.created", "response": {"status": "in_progress"}},
+        {"type": "response.output_item.added", "output_index": 0,
+         "item": {"id": "msg_synthetic", "type": "message", "status": "in_progress"}},
+        {"type": "response.output_text.delta", "output_index": 0, "delta": "untrusted partial text"},
+        done, final_event([done["item"]] if populated_final else None),
+    ])
+    service, _, _ = explainer(card, stream)
+    result = service.explain(card, True)
+    assert result["fact_ids"] == ["motion"] and result["frame_ids"] == [4]
+    assert "untrusted partial" not in result["explanation"]
+
+
+@pytest.mark.parametrize("case", [
+    "negative-index", "bool-index", "large-index", "string-index", "missing-index", "gap",
+    "duplicate-index", "duplicate-id", "conflict", "index-mismatch", "missing-item", "missing-id",
+    "unfinished", "malformed-content", "tool", "no-completed", "delta-only", "late-item",
+    "error-after-item", "error-after-completed", "duplicate-completed", "malformed-type", "malformed-status",
+])
+def test_completed_item_replay_rejects_ambiguous_or_incomplete_stream(card, case):
+    done = done_message(card)
+    ending = final_event()
+    events = [done, ending]
+    if case in {"negative-index", "bool-index", "large-index", "string-index", "gap"}:
+        done["output_index"] = {"negative-index": -1, "bool-index": True, "large-index": 32,
+                                "string-index": "0", "gap": 1}[case]
+    elif case == "missing-index":
+        del done["output_index"]
+    elif case == "duplicate-index":
+        events.insert(1, deepcopy(done))
+    elif case == "duplicate-id":
+        other = deepcopy(done)
+        other["output_index"] = 1
+        events.insert(1, other)
+    elif case == "conflict":
+        ending["response"]["output"] = [deepcopy(done["item"])]
+        ending["response"]["output"][0]["content"][0]["text"] = "{}"
+    elif case == "index-mismatch":
+        done["output_index"] = 1
+        ending["response"]["output"] = [deepcopy(done["item"])]
+    elif case == "missing-item":
+        del done["item"]
+    elif case == "missing-id":
+        del done["item"]["id"]
+    elif case == "unfinished":
+        done["item"]["status"] = "in_progress"
+    elif case == "malformed-content":
+        done["item"]["content"] = [{}]
+    elif case == "tool":
+        done["item"]["type"] = "function_call"
+    elif case == "no-completed":
+        events.pop()
+    elif case == "delta-only":
+        events[0] = {"type": "response.output_text.delta", "delta": json.dumps(selection(card))}
+    elif case == "late-item":
+        events.reverse()
+    elif case in {"error-after-item", "error-after-completed"}:
+        events.insert(1 if case == "error-after-item" else 2, {"type": "error", "code": "failed"})
+    elif case == "duplicate-completed":
+        events.append(deepcopy(ending))
+    elif case == "malformed-type":
+        done["item"]["type"] = []
+    elif case == "malformed-status":
+        done["item"]["status"] = []
+    service, _, _ = explainer(card, b"".join(event(item) for item in events))
+    with pytest.raises(ExplanationError):
+        service.explain(card, True)
+
+
+def test_done_item_selection_still_rejects_invented_evidence(card):
+    done = done_message(card)
+    invented = selection(card)
+    invented["fact_ids"] = ["speed_120_kmh"]
+    done["item"]["content"][0]["text"] = json.dumps(invented)
+    service, _, _ = explainer(card, event(done) + event(final_event()))
+    with pytest.raises(ExplanationError):
+        service.explain(card, True)
+
+
 class FakeAuth:
     def __init__(self, grant=None):
         self.calls = 0

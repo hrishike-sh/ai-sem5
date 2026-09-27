@@ -152,9 +152,14 @@ def _events(response, deadline):
 
 def _completed_selection(response, deadline):
     completed = None
+    completion_seen = False
+    done_items = {}
+    done_ids = set()
     for event in _events(response, deadline):
         kind = event.get("type")
-        if kind in {"response.failed", "response.incomplete", "error"}:
+        if not isinstance(kind, str):
+            raise ExplanationError("The model stream returned an invalid event type.")
+        if kind in {"response.failed", "response.incomplete", "response.error", "error"}:
             failure = event.get("response", {}).get("error", {}) if isinstance(event.get("response"), dict) else event
             if isinstance(failure, dict) and failure.get("code") in {
                     "subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable"}:
@@ -163,19 +168,50 @@ def _completed_selection(response, deadline):
         item = event.get("item", {})
         if isinstance(item, dict) and "call" in str(item.get("type", "")):
             raise ExplanationError("A tool call was refused.", "unexpected_tool")
+        if kind == "response.output_item.done":
+            index = event.get("output_index")
+            if completion_seen or type(index) is not int or not 0 <= index < 32 or index in done_items:
+                raise ExplanationError("The model returned a repeated, invalid, or late output index.")
+            if not isinstance(item, dict) or item.get("type") not in ("message", "reasoning"):
+                raise ExplanationError("A tool or unsupported response was refused.", "unexpected_tool")
+            item_id = item.get("id")
+            if not isinstance(item_id, str) or not item_id or len(item_id) > 256 or item_id in done_ids:
+                raise ExplanationError("The model returned an invalid or repeated output item.")
+            if ((item.get("type") == "message" and item.get("status") != "completed")
+                    or item.get("status") not in (None, "completed")):
+                raise ExplanationError("The model returned an unfinished output item.", "incomplete_response")
+            done_items[index] = item
+            done_ids.add(item_id)
         if kind == "response.completed":
-            if completed is not None:
+            if completion_seen:
                 raise ExplanationError("The model stream repeated its completed response.")
+            completion_seen = True
             completed = event.get("response")
     if not isinstance(completed, dict) or completed.get("status") != "completed":
         raise ExplanationError("The model stream ended without completed inference.", "incomplete_response")
     output = completed.get("output")
-    if not isinstance(output, list):
+    if not isinstance(output, list) or len(output) > 32:
         raise ExplanationError("The model returned no structured explanation.")
+    if output:
+        for index, item in done_items.items():
+            if index >= len(output) or output[index] != item:
+                raise ExplanationError("The completed response conflicts with its output items.")
+    elif done_items:
+        if set(done_items) != set(range(len(done_items))):
+            raise ExplanationError("The model stream omitted an output item.", "incomplete_response")
+        output = [done_items[index] for index in range(len(done_items))]
     texts = []
+    output_ids = set()
     for item in output:
         if not isinstance(item, dict):
             raise ExplanationError("The model returned malformed output.")
+        if "id" in item:
+            item_id = item["id"]
+            if not isinstance(item_id, str) or not item_id or item_id in output_ids:
+                raise ExplanationError("The model returned an invalid or repeated output item.")
+            output_ids.add(item_id)
+        if item.get("status") not in (None, "completed"):
+            raise ExplanationError("The model returned an unfinished output item.", "incomplete_response")
         if item.get("type") == "reasoning":
             continue
         if item.get("type") != "message" or item.get("role") != "assistant":
@@ -237,7 +273,8 @@ class SubscriptionExplainer:
             if not isinstance(grant, SubscriptionGrant) or not grant.valid():
                 raise ExplanationError("An authorized ChatGPT plan grant is required.", "subscription_required")
             deadline = time.monotonic() + self.timeout
-            catalog = self.http.json(RESOURCE + "/models", bearer=grant.access_token, timeout=self.timeout)
+            catalog = self.http.json(RESOURCE + "/models", bearer=grant.access_token, timeout=self.timeout,
+                                     max_bytes=4 * 1024 * 1024)
             models = catalog.get("models") if isinstance(catalog, dict) else None
             if not isinstance(models, list):
                 raise ExplanationError("ChatGPT returned no account model catalog.", "model_unavailable")

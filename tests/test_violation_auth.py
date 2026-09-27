@@ -276,6 +276,47 @@ def test_http_refuses_unofficial_endpoint_and_platform_key_before_open():
                 pytest.fail("Network request must never be reached")
 
 
+def test_catalog_response_size_is_explicit_and_auth_default_stays_small(monkeypatch):
+    http = SubscriptionHTTP()
+    raw = b'{"models":[],"synthetic_padding":"' + b"x" * 300000 + b'"}'
+    calls = []
+    @contextmanager
+    def fake_open(url, **kwargs):
+        calls.append((url, kwargs))
+        yield io.BytesIO(raw)
+    monkeypatch.setattr(http, "open", fake_open)
+    with pytest.raises(AuthError) as error:
+        http.json(RESOURCE + "/models")
+    assert error.value.code == "response_too_large"
+    assert http.json(RESOURCE + "/models", max_bytes=4 * 1024 * 1024)["models"] == []
+    with pytest.raises(AuthError) as error:
+        http.json(TOKEN)
+    assert error.value.code == "response_too_large"
+    assert all("max_bytes" not in kwargs for _, kwargs in calls)
+
+
+def test_json_exact_size_boundary_and_one_extra_byte(monkeypatch):
+    http = SubscriptionHTTP()
+    raw = b'{"fixture":"synthetic"}'
+    @contextmanager
+    def fake_open(*args, **kwargs):
+        yield io.BytesIO(raw)
+    monkeypatch.setattr(http, "open", fake_open)
+    assert http.json(DISCOVERY, max_bytes=len(raw)) == {"fixture": "synthetic"}
+    with pytest.raises(AuthError) as error:
+        http.json(DISCOVERY, max_bytes=len(raw) - 1)
+    assert error.value.code == "response_too_large"
+
+
+@pytest.mark.parametrize("limit", [None, True, 0, -1, 1.5, "400000", 4 * 1024 * 1024 + 1])
+def test_invalid_response_size_limit_never_opens_network(monkeypatch, limit):
+    http = SubscriptionHTTP()
+    monkeypatch.setattr(http, "open", lambda *a, **k: pytest.fail("No network request is allowed"))
+    with pytest.raises(AuthError) as error:
+        http.json(RESOURCE + "/models", max_bytes=limit)
+    assert error.value.code == "invalid_response_limit"
+
+
 @pytest.mark.parametrize("uri", ["http://localhost:8521/auth/callback", "https://127.0.0.1:8521/auth/callback",
                                "http://127.0.0.1:8521/callback", "http://example.com:8521/auth/callback"])
 def test_callback_is_fixed_loopback_origin(uri):
