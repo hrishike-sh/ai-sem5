@@ -1,6 +1,6 @@
 import numpy as np
 
-from .runtime import configure_cache
+from .runtime import configure_cache, model_path, runtime_config
 from .signs import colour_shape_support
 
 
@@ -33,11 +33,14 @@ class TurnSignDetector:
         from pathlib import Path
         from .perception import Perception
 
-        path = home / "models" / "turn-yahyagul-15be2681.pt"
+        path = model_path('turn_sign', home / "models" / "turn-yahyagul-15be2681.pt")
         if not path.exists():
             try:
                 path = hf_hub_download(self.MODEL, "best_roboflow.pt", revision=self.REVISION, local_files_only=True)
             except LocalEntryNotFoundError:
+                config = runtime_config()
+                if config.get('offline') or config.get('isolate_caches'):
+                    raise RuntimeError('Turn-sign model is unavailable in the offline runtime; no download was attempted.') from None
                 path = hf_hub_download(self.MODEL, "best_roboflow.pt", revision=self.REVISION)
         fingerprint = Perception._fingerprint(Path(path))
         if fingerprint["sha256"] != self.SHA256:

@@ -673,9 +673,9 @@ def create_server(port=8521):
                     with lab.lock:
                         return self.respond(lab.violation_reviews.view(query.get('id', [None])[0]))
                 if route == "/api/config":
-                    from traffic_ai.runtime import runtime_root, python_path
+                    from traffic_ai.runtime import runtime_root, python_path, model_path
                     from traffic_ai.local_models import helmet_availability
-                    vehicle_ready=python_path().is_file() and (runtime_root()/"models"/"yolo11s.pt").is_file()
+                    vehicle_ready=python_path().is_file() and model_path('road_users',runtime_root()/"models"/"yolo11s.pt").is_file()
                     return self.respond({"evidence_origin":f"http://127.0.0.1:{lab.files.server.server_port}","speed_display_v1":True,"vehicle_tracking_ready":vehicle_ready,"helmet":helmet_availability(),"defaults": Settings().to_dict(), "presets": {k: v.to_dict() for k, v in PRESETS.items()},
                                          "samples": [{"name": k, "label": v} for k, v in SAMPLE_NAMES.items() if sample_path(k).is_file()]})
                 if route == "/api/media":

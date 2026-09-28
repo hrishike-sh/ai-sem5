@@ -14,7 +14,7 @@ class Perception:
         import torch
         from ultralytics import YOLO
 
-        self.device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = device or ("cuda:0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu")
         models = home / "models"
         models.mkdir(exist_ok=True)
         self.road_users = YOLO(str(paths['road_users']))

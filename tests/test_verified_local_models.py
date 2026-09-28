@@ -47,3 +47,10 @@ def test_vehicle_only_path_does_not_require_helmet(cached):
     road,helmet,constructed=cached;helmet.unlink()
     detector=Perception(helmet=False)
     assert constructed==[str(road)] and detector.helmet is None
+
+
+@pytest.mark.parametrize('visible,expected',[(0,'cpu'),(1,'cuda:0')])
+def test_cuda_probe_requires_a_visible_device(cached,monkeypatch,visible,expected):
+    monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(cuda=SimpleNamespace(
+        is_available=lambda:True,device_count=lambda:visible)))
+    assert Perception(helmet=False).device==expected

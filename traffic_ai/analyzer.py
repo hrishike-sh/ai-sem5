@@ -32,7 +32,7 @@ class Analyzer:
         self.sign_classifier = None
         self.turn_sign_detector = None
         self.sign_observations = []
-        status("Loading road-user and helmet models. First use downloads weights.")
+        status("Loading verified local road-user and helmet models.")
         self.perception = Perception()
         cancel()
         status(f"Loading automatic scene model on {self.perception.device}.")
@@ -171,14 +171,14 @@ class Analyzer:
         self.sign_observations = []
         if sign_proposals:
             if self.sign_classifier is None:
-                self.status("Loading traffic-sign classifier. First use downloads weights.")
+                self.status("Loading the configured traffic-sign classifier.")
                 self.sign_classifier = SignClassifier()
             for detection in sign_proposals:
                 self.cancel()
                 self.sign_observations.append(self.sign_classifier.classify(rgb, detection))
         self.cancel()
         if self.turn_sign_detector is None:
-            self.status("Loading explicit turn-sign detector. First use downloads weights.")
+            self.status("Loading the configured turn-sign detector.")
             self.turn_sign_detector = ContextPaddedTurnDetector(
                 TurnSignDetector(device=self.perception.device), cancel=self.cancel)
         self.cancel()

@@ -1,7 +1,9 @@
 """Read-only, pinned local weight lookup. Never downloads or constructs models."""
 import hashlib
 from pathlib import Path
-from .runtime import runtime_root
+from .runtime import runtime_root, model_path
+
+_DEFAULT_RUNTIME_ROOT = runtime_root
 
 HELMET_REPO='iam-tsr/yolov8n-helmet-detection'
 HELMET_REVISION='59b68b03b60314badb0c19ebcc3b95baa8241cf8'
@@ -17,6 +19,10 @@ def verified_local_models(helmet=True):
     if helmet:
         cached=home/'huggingface'/'hub'/'models--iam-tsr--yolov8n-helmet-detection'
         paths['helmet']=cached/'snapshots'/HELMET_REVISION/'best.pt'
+    # An explicitly injected root owns its default paths (including existing
+    # isolated test callers); ordinary callers use optional local model maps.
+    if runtime_root is _DEFAULT_RUNTIME_ROOT:
+        paths={key:model_path(key,path) for key,path in paths.items()}
     manifest={}
     for key,path in paths.items():
         expected,size=PINS[key]
@@ -36,5 +42,5 @@ def helmet_availability():
     try:
         verified_local_models()
         return {'ready':True,'message':'Pinned vehicle and helmet models are available locally.'}
-    except (OSError,RuntimeError) as exc:
+    except (OSError,RuntimeError,ValueError) as exc:
         return {'ready':False,'message':str(exc)}
