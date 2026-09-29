@@ -56,6 +56,9 @@ def process_run(run):
                 if request["info"]["kind"] == "image":
                     (run / "detections.png").write_bytes(png_bytes(annotate_detections(result.color_rgb, analysis.detections)))
                 record["frame"] = index
+                record["source_size"] = list(result.source_size)
+                record["processed_size"] = [result.color_rgb.shape[1], result.color_rgb.shape[0]]
+                record["transform_to_source_pixel_centres"] = result.transform_to_source.tolist()
                 record["scene_revision"] = saved_scene_revision
                 record["signal_observations"] = getattr(analyzer, "signals", [])
                 record["turn_observations"] = getattr(analyzer, "turn_observations", [])

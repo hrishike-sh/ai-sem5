@@ -34,7 +34,8 @@ def test_vehicle_list_mapping_and_current_trace_survive_worker_and_inspector(wor
     def video(run,frame_hook,final_hook):
         pixels=np.full((80,120,3),80,np.uint8)
         for index,(stamp,_,_) in enumerate(rows):
-            frame_hook(SimpleNamespace(color_rgb=pixels,timestamp=stamp),pixels,index,0.)
+            frame_hook(SimpleNamespace(color_rgb=pixels,timestamp=stamp,
+                                       source_size=(120,80),transform_to_source=np.eye(3)),pixels,index,0.)
         summary=final_hook()
         saved=records(run)
         summary['assessment_counts']=dict(Counter(d['rule']+'/'+d['verdict'] for r in saved for d in r['decisions']))
@@ -48,6 +49,8 @@ def test_vehicle_list_mapping_and_current_trace_survive_worker_and_inspector(wor
     boundary=saved[1]['event_confirmation']['lifecycle']['boundaries'][0]
     assert boundary['source_detection_index']==0 and boundary['discarded_states']['pending']==1
     for row in saved:
+        assert row['source_size']==row['processed_size']==[120,80]
+        assert row['transform_to_source_pixel_centres']==np.eye(3).tolist()
         assert row['event_vehicle_indices']==[1]
         assert row['detections'][row['event_vehicle_indices'][0]]['track_id']==7
         assert row['event_confirmation_indexing']['index_base']==0

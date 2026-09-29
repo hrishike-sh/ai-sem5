@@ -144,7 +144,9 @@ def test_video_export_is_current_source_indexed_and_preserves_raw_assessments(wo
     def fake_video(run, frame_hook, final_hook):
         pixels = np.full((80, 120, 3), 80, np.uint8)
         for index, (timestamp, _, _) in enumerate(rows):
-            frame_hook(SimpleNamespace(color_rgb=pixels, timestamp=timestamp), pixels, index, 0.)
+            frame_hook(SimpleNamespace(color_rgb=pixels, timestamp=timestamp,
+                                       source_size=(120, 80), transform_to_source=np.eye(3)),
+                       pixels, index, 0.)
         write_json(run / "report.json", {"kind": "video", "synthetic": True, "ai": final_hook()})
         worker.update(run, "complete", progress=1, message="Synthetic export test complete")
 
@@ -154,6 +156,8 @@ def test_video_export_is_current_source_indexed_and_preserves_raw_assessments(wo
     assert len(saved) == len(rows) and instance.snapshot_calls == list(range(len(rows)))
     for index, frame in enumerate(saved):
         assert frame["frame"] == index and frame["timestamp"] == rows[index][0]
+        assert frame["source_size"] == frame["processed_size"] == [120, 80]
+        assert frame["transform_to_source_pixel_centres"] == np.eye(3).tolist()
         assert frame["scene_revision"] == 1
         trace = frame["event_confirmation"]
         assert trace["timestamp"] == frame["timestamp"] == trace["lifecycle"]["timestamp"]
