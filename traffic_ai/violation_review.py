@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import tempfile
 import threading
+from datetime import datetime, timezone
 
 from ivp.marking_policy import geometry_is_configured
 from ivp.media import load_image, png_bytes, preview_frame, source_revision, write_json
@@ -140,6 +141,7 @@ class ViolationReview:
             raise ValueError('This run has no saved AI assessment report.')
         fingerprint = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
         groups, total, skipped, deferred, size = {}, 0, 0, 0, 0
+        nonapplicable = 0
         synthetic = (request.get('synthetic') is True or request['info'].get('synthetic') is True
                      or report.get('synthetic') is True or report['ai'].get('synthetic') is True)
         with self._path(run, 'detections.jsonl').open('rb') as stream:
@@ -171,6 +173,10 @@ class ViolationReview:
                         continue
                     if rule not in RULES:
                         skipped += 1
+                        continue
+                    if (rule == 'helmet_absence' and decision['verdict'] == 'cannot_assess'
+                            and decision['reason'] == 'This rider rule applies to motorcycles'):
+                        nonapplicable += 1
                         continue
                     key = (rule, decision.get('track_id'), scene)
                     if key not in groups and len(groups) >= MAX_CARDS:
@@ -216,10 +222,13 @@ class ViolationReview:
             card['review'] = state.get(card['id'], {'decision': None, 'note': ''})
             card['synthetic'] = True if synthetic else None
         result = {'run_id': run_id, 'fingerprint': fingerprint, 'cards': cards, 'synthetic': True if synthetic else None,
+                  'source_name': Path(request.get('source', '')).name,
+                  'omitted_nonapplicable_count': nonapplicable,
                   'provenance_notice': 'Synthetic recorded fixture or demonstration; not live inference or evaluation data.' if synthetic else
                       'Recorded algorithm output; synthetic provenance is unrecorded.',
                   'limits': {'max_cards': MAX_CARDS, 'truncated': skipped > 0,
                              'omitted_observations': skipped, 'deferred_triple_riding_observations': deferred,
+                             'nonapplicable_observations': nonapplicable,
                              'recorded_decisions': total, 'grouping': 'rule + track + scene',
                              'notice': NOTICE},
                   'provenance': {'source_hashes': hashes, 'synthetic': True if synthetic else None,
@@ -230,7 +239,120 @@ class ViolationReview:
                                  'media_kind': request['info']['kind'],
                                  'integrity': 'Current saved-file hashes bind this review; original authenticity is not established.',
                                  'notice': NOTICE}}
+        result['explanations'] = self._explanations(run, fingerprint, cards)
         return run, request, result
+
+    @staticmethod
+    def _normalise_explanation(result, card, *, cached=False):
+        from .violation_llm import VISUAL_OBSERVATIONS, VISUAL_NOTICE, _fact_text, card_fingerprint, validate_selection
+        from .violation_images import image_fingerprint, PRIVACY_NOTICE
+        if (not isinstance(result, dict) or result.get('state') != 'explained'
+                or result.get('provider') != 'chatgpt_subscription' or result.get('card_id') != card['id']
+                or result.get('rule') != card['rule'] or result.get('status') != card['status']
+                or not isinstance(result.get('model'), str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,150}', result['model'])):
+            raise ValueError('Saved explanation is not bound to this evidence card.')
+        current_fingerprint = card_fingerprint(card)
+        evidence_fingerprint = card_fingerprint({key: value for key, value in card.items() if key != 'review'})
+        if cached:
+            if result.get('evidence_fingerprint') != evidence_fingerprint:
+                raise ValueError('Saved explanation evidence fingerprint is invalid.')
+        elif result.get('card_fingerprint') != current_fingerprint:
+            raise ValueError('Explanation card changed before saving.')
+        selection = {'card_id': card['id'], 'card_fingerprint': current_fingerprint,
+                     **{key: result.get(key) for key in ('fact_ids', 'missing_fact_ids', 'frame_ids')}}
+        validate_selection(selection, card)
+        chosen = [{f['id']: f for f in card['facts']}[key] for key in selection['fact_ids']]
+        gaps = [{f['id']: f for f in card['missing_facts']}[key] for key in selection['missing_fact_ids']]
+        mode, images, visual = result.get('vision_mode', 'facts_only'), [], []
+        if mode == 'selected_frames':
+            descriptors = result.get('images_sent')
+            if not isinstance(descriptors, list) or not 1 <= len(descriptors) <= 3:
+                raise ValueError('Saved explanation image references are invalid.')
+            for image in descriptors:
+                if (not isinstance(image, dict) or set(image) != {'id','timestamp','role','sha256','width','height','byte_length','privacy'}
+                        or image.get('id') not in card['frame_ids']
+                        or not isinstance(image.get('sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', image['sha256'])
+                        or not _finite(image.get('timestamp')) or image['timestamp'] < 0
+                        or image.get('role') not in ('context', 'subject_crop')
+                        or any(type(image.get(key)) is not int or not 1 <= image[key] <= 768 for key in ('width','height'))
+                        or type(image.get('byte_length')) is not int or not 1 <= image['byte_length'] <= 256*1024):
+                    raise ValueError('Saved explanation image references are invalid.')
+                privacy = image.get('privacy')
+                if (not isinstance(privacy, dict) or set(privacy) != {'metadata_stripped','blurred_regions','notice'}
+                        or privacy['metadata_stripped'] is not True or privacy['notice'] != PRIVACY_NOTICE
+                        or type(privacy['blurred_regions']) is not int or not 0 <= privacy['blurred_regions'] <= 100):
+                    raise ValueError('Saved explanation image privacy metadata is invalid.')
+                images.append(image)
+            if len({image['id'] for image in images}) != len(images) or result.get('image_fingerprint') != image_fingerprint(images):
+                raise ValueError('Saved explanation image fingerprint is invalid.')
+            expected = {(image['id'], category) for image in images for category in VISUAL_OBSERVATIONS}
+            observations = result.get('visual_observations')
+            if not isinstance(observations, list) or len(observations) != len(expected):
+                raise ValueError('Saved visual observations are incomplete.')
+            for observation in observations:
+                if not isinstance(observation, dict):
+                    raise ValueError('Saved visual observations are invalid.')
+                identity, category, value = (observation.get(key) for key in ('frame_id', 'category', 'observation'))
+                if not isinstance(category, str) or not isinstance(value, str) or (identity, category) not in expected or value not in VISUAL_OBSERVATIONS[category]:
+                    raise ValueError('Saved visual observations are invalid.')
+                expected.remove((identity, category))
+                visual.append({'frame_id': identity, 'category': category, 'observation': value,
+                               'text': 'Model observation: ' + VISUAL_OBSERVATIONS[category][value]})
+        elif mode != 'facts_only' or result.get('visual_observations') or result.get('images_sent'):
+            raise ValueError('Saved explanation mode is invalid.')
+        return {'state': 'explained', 'provider': 'chatgpt_subscription', 'model': result['model'],
+                'card_id': card['id'], 'card_fingerprint': current_fingerprint,
+                'evidence_fingerprint': evidence_fingerprint,
+                'rule': card['rule'], 'status': card['status'], 'reason': card['reason'],
+                'explanation': '\n\n'.join([card['reason']] + [_fact_text(item) for item in chosen]
+                    + ['Missing evidence: ' + item['text'] for item in gaps]),
+                'facts': chosen, 'missing_facts': gaps, **{key: selection[key] for key in ('fact_ids','missing_fact_ids','frame_ids')},
+                'mode': 'images_and_facts' if images else 'facts_only', 'vision_mode': mode,
+                'images_sent': images, 'image_fingerprint': result.get('image_fingerprint') if images else None,
+                'visual_observations': visual, 'visual_notice': VISUAL_NOTICE if images else 'Facts only: no images were sent or inspected.'}
+
+    def _explanations(self, run, fingerprint, cards):
+        path = self._path(run, 'violation-explanations.json')
+        if not path.exists():
+            return {}
+        try:
+            saved = _json(_read(path))
+            if not isinstance(saved, dict) or saved.get('fingerprint') != fingerprint or not isinstance(saved.get('results'), dict):
+                return {}
+            result = {}
+            for card in cards:
+                item = saved['results'].get(card['id'])
+                if item is not None:
+                    try:
+                        stamp = item.get('saved_at') if isinstance(item, dict) else None
+                        if not isinstance(stamp, str) or len(stamp) > 40:
+                            continue
+                        parsed_stamp = datetime.fromisoformat(stamp)
+                        if parsed_stamp.tzinfo is None:
+                            continue
+                        result[card['id']] = {**self._normalise_explanation(item, card, cached=True), 'saved': True,
+                                             'saved_at': parsed_stamp.isoformat()}
+                    except (ValueError, TypeError, KeyError):
+                        continue
+            return result
+        except (ValueError, OSError, TypeError):
+            return {}
+
+    def save_explanation(self, data, result):
+        with self.lock:
+            run, _, view, card = self._bound(data)
+            normalized = self._normalise_explanation(result, card)
+            normalized['saved_at'] = datetime.now(timezone.utc).isoformat()
+            entries = view['explanations']
+            entries[card['id']] = normalized
+            if self._sources(run) != view['provenance']['source_hashes']:
+                raise ValueError('Evidence changed before saving the explanation.')
+            payload = {'schema_version': 1, 'fingerprint': view['fingerprint'], 'results': entries}
+            encoded = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            if len(encoded) > MAX_JSON:
+                raise ValueError('Saved explanation storage limit reached; existing explanations were preserved.')
+            self._write_bytes(self._path(run, 'violation-explanations.json'), encoded)
+            return {**normalized, 'saved': True}
 
     @staticmethod
     def _validate_decision(decision, stamp):
@@ -419,9 +541,11 @@ class ViolationReview:
                     if role == 'during' and request['info']['kind'] == 'video' and abs(actual - target) > .25:
                         raise ValueError('No source frame close enough to the recorded observation is available.')
                     path = self._path(run, 'violation-frame-' + item['id'] + '.png')
-                    self._write_bytes(path, png_bytes(rgb))
+                    pixels = png_bytes(rgb)
+                    self._write_bytes(path, pixels)
                     item.update(timestamp=actual, available=True, url=self.files.url(path),
-                                source_revision=revision, reason='Actual decoded source frame; no inference rerun.')
+                                source_revision=revision, sha256=hashlib.sha256(pixels).hexdigest(),
+                                reason='Actual decoded source frame; no inference rerun.')
                 except (ValueError, OSError, KeyError, TypeError, OverflowError) as exc:
                     item['reason'] = str(exc)
             if self._sources(run) != view['provenance']['source_hashes']:

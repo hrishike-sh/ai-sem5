@@ -6,9 +6,11 @@ import json
 import time
 
 import pytest
+from PIL import Image
 
 from traffic_ai.violation_auth import AuthError, PLAN_SCOPES, SubscriptionGrant
 from traffic_ai.violation_llm import ExplanationError, SubscriptionExplainer, card_fingerprint
+from traffic_ai.violation_images import image_fingerprint, prepare_evidence_image
 
 
 @pytest.fixture
@@ -318,3 +320,164 @@ def test_usage_limit_after_streaming_never_delivers_partial_explanation(card):
     with pytest.raises(ExplanationError) as error:
         service.explain(card, True)
     assert error.value.code == "usage_limit"
+
+
+@pytest.fixture
+def images():
+    return [prepare_evidence_image(Image.new("RGB", (32, 24), "orange"), frame_id=4, timestamp=2.0)]
+
+
+def visual_selection(card, images):
+    value = selection(card)
+    value["image_fingerprint"] = image_fingerprint(images)
+    value["visual_observations"] = [
+        {"frame_id": image["id"], "category": category, "observation": observation}
+        for image in images for category, observation in [
+            ("head_visibility", "unclear"), ("objects", "person_and_two_wheeler_visible"),
+            ("direction_context", "direction_context_unverified")]]
+    return value
+
+
+def test_images_use_supported_content_and_leave_findings_immutable(card, images):
+    original_card, original_images = deepcopy(card), deepcopy(images)
+    service, auth, http = explainer(card, completed(visual_selection(card, images)))
+    result = service.explain(card, True, images=images)
+    assert auth.calls == 1 and len(http.calls) == 2
+    assert http.calls[0][1]["max_bytes"] == 4 * 1024 * 1024
+    payload = http.calls[1][1]["data"]
+    assert payload["tools"] == [] and payload["tool_choice"] == "none"
+    assert payload["store"] is False and payload["stream"] is True
+    content = payload["input"][0]["content"]
+    assert [item["type"] for item in content] == ["input_text", "input_text", "input_image"]
+    assert content[2] == {"type": "input_image", "image_url": images[0]["data_url"], "detail": "auto"}
+    assert json.loads(content[0]["text"])["image_fingerprint"] == image_fingerprint(images)
+    assert "untrusted" in payload["instructions"] and "EVERY missing_fact ID" in payload["instructions"]
+    schema = payload["text"]["format"]["schema"]
+    assert set(schema["required"]) == set(visual_selection(card, images))
+    variants = schema["properties"]["visual_observations"]["items"]["anyOf"]
+    assert all(variant["additionalProperties"] is False for variant in variants)
+    assert all(variant["properties"]["frame_id"] == {"type": "integer", "enum": [4]} for variant in variants)
+    assert result["vision_mode"] == "selected_frames"
+    assert result["image_fingerprint"] == image_fingerprint(images)
+    assert len(result["visual_observations"]) == 3
+    assert all(item["text"].startswith("Model observation: ") for item in result["visual_observations"])
+    assert "not recorded findings" in result["visual_notice"]
+    assert "data_url" not in json.dumps(result)
+    assert result["missing_facts"] == card["missing_facts"]
+    for key in ("rule", "status", "reason"):
+        assert result[key] == card[key]
+    assert result["explanation"] == explainer(card)[0].explain(card, True)["explanation"]
+    assert card == original_card and images == original_images
+
+
+def test_facts_only_explicitly_reports_no_images_or_observations(card):
+    service, _, http = explainer(card)
+    result = service.explain(card, True)
+    assert result["vision_mode"] == "facts_only"
+    assert result["images_sent"] == [] and result["visual_observations"] == []
+    assert result["image_fingerprint"] is None and "no images" in result["visual_notice"]
+    assert isinstance(http.calls[1][1]["data"]["input"][0]["content"], str)
+
+
+@pytest.mark.parametrize("case", [
+    "invented-frame", "unsent-frame", "bool-frame", "typed-frame", "extra-prose", "speed", "legal-verdict",
+    "identity", "category", "wrong-category-value", "duplicate", "missing-category", "empty", "wrong-images",
+    "erase-missing-facts", "rewrite-finding", "array-category", "array-observation",
+])
+def test_visual_schema_rejects_unbound_measurements_prose_and_missing_evidence(card, images, case):
+    value = visual_selection(card, images)
+    first = value["visual_observations"][0]
+    if case in {"invented-frame", "unsent-frame", "bool-frame", "typed-frame"}:
+        first["frame_id"] = {"invented-frame": 900, "unsent-frame": 5, "bool-frame": True, "typed-frame": "4"}[case]
+    elif case == "extra-prose":
+        first["text"] = "The rider is guilty."
+    elif case in {"speed", "legal-verdict", "identity", "wrong-category-value"}:
+        first["observation"] = {"speed": "120 km/h", "legal-verdict": "helmet_violation",
+                                "identity": "named_person", "wrong-category-value": "person_visible"}[case]
+    elif case == "category":
+        first["category"] = "legal_conclusion"
+    elif case == "duplicate":
+        value["visual_observations"][1] = deepcopy(first)
+    elif case == "missing-category":
+        value["visual_observations"].pop()
+    elif case == "empty":
+        value["visual_observations"] = []
+    elif case == "wrong-images":
+        value["image_fingerprint"] = "0" * 64
+    elif case == "erase-missing-facts":
+        value["missing_fact_ids"] = []
+    elif case == "rewrite-finding":
+        value["status"] = "violation"
+    elif case == "array-category":
+        first["category"] = []
+    elif case == "array-observation":
+        first["observation"] = []
+    service, _, _ = explainer(card, completed(value))
+    with pytest.raises(ExplanationError):
+        service.explain(card, True, images)
+
+
+def test_visual_result_is_refused_when_no_images_were_sent(card, images):
+    service, _, _ = explainer(card, completed(visual_selection(card, images)))
+    with pytest.raises(ExplanationError):
+        service.explain(card, True)
+
+
+def test_image_request_never_silently_falls_back_to_facts_only(card, images):
+    service, _, http = explainer(card)
+    with pytest.raises(ExplanationError):
+        service.explain(card, True, images)
+    assert len(http.calls) == 2
+
+
+@pytest.mark.parametrize("case", ["url", "hash", "unknown-frame", "too-many", "empty"])
+def test_invalid_image_input_fails_before_grant_or_network(card, images, case):
+    if case == "url":
+        images[0]["data_url"] = "https://attacker.invalid/image.jpg"
+    elif case == "hash":
+        images[0]["sha256"] = "0" * 64
+    elif case == "unknown-frame":
+        images[0]["id"] = 9
+    elif case == "too-many":
+        images *= 4
+    else:
+        images.clear()
+    service, auth, http = explainer(card)
+    with pytest.raises(ExplanationError) as error:
+        service.explain(card, True, images)
+    assert error.value.code == "invalid_images"
+    assert auth.calls == 0 and http.calls == []
+
+
+def test_image_consent_precedes_decoding(card, images, monkeypatch):
+    def forbidden(*args):
+        pytest.fail("Image decoding was attempted before consent")
+    monkeypatch.setattr("traffic_ai.violation_llm.validate_evidence_images", forbidden)
+    service, auth, http = explainer(card)
+    with pytest.raises(ExplanationError) as error:
+        service.explain(card, False, images)
+    assert error.value.code == "consent_required" and not auth.calls and not http.calls
+
+
+def test_prepared_image_revision_change_during_request_rejects_result(card, images):
+    service, auth, _ = explainer(card, completed(visual_selection(card, images)))
+    original_grant = auth.grant
+    def mutate():
+        images[0]["timestamp"] = 88
+        return original_grant()
+    auth.grant = mutate
+    with pytest.raises(ExplanationError) as error:
+        service.explain(card, True, images)
+    assert error.value.code == "stale_card"
+
+
+def test_three_selected_frames_keep_type_and_category_bindings(card, images):
+    card["frame_ids"].append("context-frame")
+    images.extend([prepare_evidence_image(Image.new("RGB", (24, 32)), frame_id=frame, timestamp=3)
+                   for frame in (5, "context-frame")])
+    service, _, http = explainer(card, completed(visual_selection(card, images)))
+    result = service.explain(card, True, images)
+    assert len(result["visual_observations"]) == 9
+    assert [item["id"] for item in result["images_sent"]] == [4, 5, "context-frame"]
+    content = http.calls[1][1]["data"]["input"][0]["content"]
+    assert sum(item["type"] == "input_image" for item in content) == 3

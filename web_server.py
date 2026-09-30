@@ -30,6 +30,7 @@ from ivp.ai_assessments import saved_ai_page
 from ivp.examples import examples, identify_example
 from ivp.marking_policy import mask_export_manifest, review_only_policy
 from traffic_ai.violation_review import ViolationReview
+from traffic_ai.violation_preparation import EvidencePreparations
 from traffic_ai.violation_llm import SubscriptionExplainer
 from traffic_ai.violation_auth import SubscriptionAuth, AuthError
 from http.cookies import SimpleCookie
@@ -155,6 +156,7 @@ class Lab:
         self.evidence_reviews = EvidenceReviews(ROOT, self.executor, self.files)
         self.scene_reviews = SceneReviews(ROOT, self.executor)
         self.violation_reviews = ViolationReview(ROOT, self.files)
+        self.violation_preparations = EvidencePreparations(self.violation_reviews)
         self.token = secrets.token_urlsafe(32)
 
     def close(self):
@@ -436,21 +438,36 @@ class Lab:
             return self.violation_reviews.decide(data)
         if route == '/api/violation-frames':
             return self.violation_reviews.frames(data)
+        if route == '/api/violation-prepare':
+            return self.violation_preparations.prepare(data)
         if route == '/api/violation-export':
             return self.violation_reviews.export(data)
         if route == '/api/violation-explain':
+            mode = data.get('mode', 'facts_only')
+            if mode not in ('facts_only', 'images_and_facts'):
+                raise ValueError('Choose selected images and facts, or structured facts only.')
+            if data.get('consent') is not True:
+                raise ValueError('Approve sending the selected evidence to ChatGPT first.')
             view = self.violation_reviews.view(data.get('id'))
             if data.get('fingerprint') != view['fingerprint']:
                 raise ValueError('Evidence changed. Reload the review before requesting an explanation.')
             card = next((item for item in view['cards'] if item['id'] == data.get('card_id')), None)
             if card is None:
                 raise ValueError('Evidence card was not found.')
-            result = self.violation_explainer.explain(card, consent=data.get('consent') is True)
+            if mode == 'images_and_facts':
+                images = self.violation_preparations.load(data)
+                result = self.violation_explainer.explain(card, consent=True, images=images)
+                self.violation_preparations.load(data)
+            else:
+                result = self.violation_explainer.explain(card, consent=True)
             current = self.violation_reviews.view(data.get('id'))
             if current['fingerprint'] != view['fingerprint'] or next(
                     (item for item in current['cards'] if item['id'] == card['id']), None) != card:
                 raise ValueError('Saved evidence changed during the explanation. Refresh the review.')
-            return {'run_id': view['run_id'], 'card_id': card['id'], 'fingerprint': view['fingerprint'], **result}
+            if result.get('state') == 'explained':
+                result = self.violation_reviews.save_explanation(data, result)
+            return {'run_id': view['run_id'], 'card_id': card['id'], 'fingerprint': view['fingerprint'],
+                    'mode': mode, **result}
         if route == '/api/helmet':
             path,info=self._source(data)
             stamp=data.get('timestamp',0)
@@ -674,9 +691,10 @@ def create_server(port=8521):
                         return self.respond(lab.violation_reviews.view(query.get('id', [None])[0]))
                 if route == "/api/config":
                     from traffic_ai.runtime import runtime_root, python_path, model_path
+                    from traffic_ai.readiness import pipeline_readiness
                     from traffic_ai.local_models import helmet_availability
                     vehicle_ready=python_path().is_file() and model_path('road_users',runtime_root()/"models"/"yolo11s.pt").is_file()
-                    return self.respond({"evidence_origin":f"http://127.0.0.1:{lab.files.server.server_port}","speed_display_v1":True,"vehicle_tracking_ready":vehicle_ready,"helmet":helmet_availability(),"defaults": Settings().to_dict(), "presets": {k: v.to_dict() for k, v in PRESETS.items()},
+                    return self.respond({"evidence_origin":f"http://127.0.0.1:{lab.files.server.server_port}","speed_display_v1":True,"vehicle_tracking_ready":vehicle_ready,"helmet":helmet_availability(),"violation_readiness":pipeline_readiness(),"defaults": Settings().to_dict(), "presets": {k: v.to_dict() for k, v in PRESETS.items()},
                                          "samples": [{"name": k, "label": v} for k, v in SAMPLE_NAMES.items() if sample_path(k).is_file()]})
                 if route == "/api/media":
                     with lab.lock:
