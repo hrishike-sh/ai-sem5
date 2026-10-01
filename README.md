@@ -19,6 +19,8 @@ The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It
 2. Open timestamped candidate cards, inspect recorded facts and missing context, and load before/during/after frames. Frame timestamps are actual decoded positions; unavailable frames are labeled.
 3. Accept or reject a candidate with an optional note, then export the local review JSON. Human decisions are stored separately from the original algorithm output and are invalidated if that output changes.
 
+For a short walkthrough, see the [demo guide](docs/DEMO.md). Optional ChatGPT explanations are described below; the review workflow also works without them.
+
 The review prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Triple-riding review is deferred. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
 
 The advanced detection and overview interface remains available at `/studio`. Saved results and uploads stay in this repository's local runtime directories.
@@ -27,7 +29,14 @@ The advanced detection and overview interface remains available at `/studio`. Sa
 
 The Windows prototype implements the official [Sign in with ChatGPT flow for locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source/sign-in). In the review page, choose **Connect ChatGPT** and explicitly approve opening sign-in to authorize ViolationLens. This creates a separate app grant; it does not reuse Codex or browser credentials. The grant is encrypted with Windows DPAPI under `%LOCALAPPDATA%/ViolationLens/auth`, outside the repository. Installing dependencies or opening the page does not authorize access.
 
-After sign-in, each card has a separate opt-in explanation action. Its canonical evidence labels and values, rule/status, and identifiers are sent; footage, images, reviewer notes and source paths are excluded. The adapter queries models available to that account and accepts only completed structured responses containing supplied IDs. Human-readable output is composed from the saved canonical facts; the model cannot add measurements, change findings or omit missing-fact warnings. This is a constrained explanation aid, not a new vision assessment.
+After sign-in, each card offers two explicit choices:
+
+- **Preview frames and facts for ChatGPT** prepares the exact images and structured evidence locally. Inspect that preview, then choose **Send selected frames and facts to ChatGPT** to send it. A request contains at most three JPEG images, each at most 768 pixels on its longest edge. Preparation may include context images and subject crops; the full clip is not sent. JPEG metadata is stripped, but crops or blur do not guarantee anonymity, and identities may remain visible.
+- **Send structured facts only to ChatGPT** sends the card's canonical evidence labels and values, rule/status, identifiers, and missing context without images. This remains an explicit choice when images are unavailable; a failed image request does not silently switch to facts-only.
+
+Reviewer notes and source paths are excluded from both requests. The adapter queries models available to the connected account and accepts completed structured responses tied to the supplied evidence IDs. The factual explanation uses saved canonical facts and retains missing-fact warnings. Image observations appear separately as fallible model interpretations; they do not change recorded findings or establish speed, permitted direction, identity, guilt, or a legal violation.
+
+Successful explanations are saved with the original evidence fingerprint and included in the review export. Reopening a run shows **Saved explanation**, its image descriptors, and any model observations. Reloading does not send the evidence again or run new inference. Sending new image evidence requires a current exact preview and another explicit send action.
 
 The app uses ChatGPT plan usage and has no paid API fallback. Account eligibility, available models and a live inference request must be verified after authorization. Offline tests use clearly labeled mock grants and responses; they do not demonstrate live access. Usage and limits are managed in [ChatGPT settings](https://chatgpt.com/settings/usage). A failed or incomplete stream produces an error, not a fabricated explanation.
 
@@ -49,6 +58,8 @@ Scene overview is optional and uses the bounded CPU runtime specified by `Vision
 ## Scope
 
 Detection covers road users and helmets, with tracking and evidence-based assessments for nine traffic-rule categories. Saved results include media, individual decisions, event evidence and source-coordinate information. Unknown context remains `cannot_assess`. General real-traffic accuracy and fully automatic signal/sign applicability have not been established. Scene overview categories are unverified and do not determine violations.
+
+Three actual four-second runs on permitted real footage produced **zero supported candidates**. Raw detections included a billboard face mistaken for an unhelmeted head and a car region mistaken for a helmet; association and rule checks did not promote those detections to supported violations. These small checks illustrate limitations and withholding behavior, not an accuracy benchmark or proof that every event was found.
 
 Provide your own permitted image or video. No demo media, private uploads, cached weights, credentials or generated results are bundled.
 
