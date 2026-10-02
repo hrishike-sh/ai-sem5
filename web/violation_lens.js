@@ -22,6 +22,20 @@
   function priority(card) { return /helmet|wrong.?way|direction/i.test(card.rule || ''); }
   function visibleCards(cards, filter) { return list(cards).filter(card => filter === 'priority' ? priority(card) : filter === 'unreviewed' ? !['accept','reject'].includes(card.review?.decision) : true).slice().sort((a,b) => Number(priority(b)) - Number(priority(a))); }
   function disposition(review) { return review?.decision === 'accept' ? 'Human disposition: accepted for review record.' : review?.decision === 'reject' ? 'Human disposition: rejected for review record.' : 'Human disposition: not reviewed.'; }
+  function reviewSummary(view, shownCount) {
+    const cards=list(view?.cards),total=cards.length,reviewed=cards.filter(c=>['accept','reject'].includes(c.review?.decision)).length,supported=cards.filter(c=>c.status==='supported').length;
+    const truncated=view?.limits?.truncated===true;
+    const count=value=>Number.isSafeInteger(value)&&value>=0?value:null;
+    const nonapplicable=count(view?.omitted_nonapplicable_count??view?.limits?.nonapplicable_observations)||0;
+    let summary=view?.synthetic===true?'SYNTHETIC TEST EVIDENCE · ':'';
+    summary+=total||truncated?`${total} review card${total===1?'':'s'} returned · ${supported} supported candidate${supported===1?'':'s'} in this returned set · ${reviewed} reviewed · ${shownCount} shown by current filter. Findings describe recorded evidence, not legal conclusions.`:'0 supported candidates. No applicable review candidates were recorded. This does not establish that no violation occurred.';
+    if(truncated) {
+      const maximum=count(view.limits.max_cards),omitted=count(view.limits.omitted_observations);
+      summary+=` Review display is capped${maximum===null?'':` at ${maximum} cards`}. ${omitted===null?'Additional':omitted+' additional'} recorded per-frame observations were omitted by the server limit; this is not a count of unique incidents. Supported counts apply only to the returned review cards, not the full clip.`;
+    }
+    if(nonapplicable>0)summary+=` ${truncated?'Separately, ':''}${nonapplicable} explicitly non-applicable observations omitted.`;
+    return summary;
+  }
   function ruleLabel(rule) { return String(rule || 'Unspecified candidate').replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase()); }
   function reviewPayload(view, cardID, decision, note) {
     if (!view?.run_id || !view.fingerprint || !list(view.cards).some(c => c.id === cardID)) throw Error('Reload the evidence before saving this decision.');
@@ -84,7 +98,7 @@
       <div class="review-decision"><h4>Your review</h4><p class="hint">Your disposition is saved separately. The machine finding and its evidence remain unchanged.</p><p class="disposition" data-slot="disposition">${escapeHTML(disposition(card.review))}</p><label for="note-${index}">Reviewer note (optional; saved with Accept or Reject)</label><textarea id="note-${index}" data-slot="note" maxlength="4000" placeholder="What did you observe?">${escapeHTML(card.review?.note || '')}</textarea><div class="actions"><button type="button" data-action="accept">Accept candidate</button><button type="button" class="secondary" data-action="reject">Reject candidate</button><button type="button" class="secondary" data-action="reset">Reset review</button></div></div>
       <p class="card-feedback" data-slot="feedback" role="status" aria-live="polite"></p></div></article>`;
   }
-  const helpers = {escapeHTML,localURL,authURL,timestamp,progress,runActive,priority,visibleCards,disposition,reviewPayload,readiness,validatePreparation,preparedPayload,renderPreparation,renderExplanation,renderFrames,renderCard};
+  const helpers = {escapeHTML,localURL,authURL,timestamp,progress,runActive,priority,visibleCards,disposition,reviewSummary,reviewPayload,readiness,validatePreparation,preparedPayload,renderPreparation,renderExplanation,renderFrames,renderCard};
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
   if (!root.document) return;
 
@@ -161,9 +175,7 @@
     finally{if(generation===state.generation){state.busy=false;actions();}}
   }
   function updateReviewSummary(shownCount) {
-    const cards=list(state.review?.cards),total=cards.length,reviewed=cards.filter(c=>['accept','reject'].includes(c.review?.decision)).length,supported=cards.filter(c=>c.status==='supported').length;
-    const omitted=Number(state.review?.omitted_nonapplicable_count)||0;
-    $('review-summary').textContent=(state.review?.synthetic===true?'SYNTHETIC TEST EVIDENCE · ':'')+(total ? `${total} candidate${total===1?'':'s'} · ${supported} supported candidates · ${reviewed} reviewed · ${shownCount} shown. Findings describe recorded evidence, not legal conclusions.` : '0 supported candidates. No applicable review candidates were recorded. This does not establish that no violation occurred.')+(omitted>0?` ${omitted} explicitly non-applicable observations omitted.`:'');
+    $('review-summary').textContent=reviewSummary(state.review,shownCount);
   }
   let shownCardCount=0;
   function drawCards() {

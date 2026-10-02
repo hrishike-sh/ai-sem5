@@ -99,6 +99,48 @@ test('helmet and direction candidates are prioritized without hiding uncertainty
   assert.deepEqual(cards.map(c=>c.id),['a','b','c','d']);
 });
 
+test('server cap, current filter and non-applicable omissions have distinct meanings in the summary', () => {
+  const view={cards:Array.from({length:200},(_,i)=>({id:String(i),status:'insufficient_evidence'})),limits:{max_cards:200,truncated:true,omitted_observations:2592},omitted_nonapplicable_count:80};
+  const summary=lens.reviewSummary(view,12);
+  assert.match(summary,/200 review cards returned/);
+  assert.match(summary,/0 supported candidates in this returned set/);
+  assert.match(summary,/12 shown by current filter/);
+  assert.match(summary,/Review display is capped at 200 cards/);
+  assert.match(summary,/2592 additional recorded per-frame observations were omitted by the server limit/);
+  assert.match(summary,/not a count of unique incidents/);
+  assert.match(summary,/Supported counts apply only to the returned review cards, not the full clip/);
+  assert.match(summary,/Separately, 80 explicitly non-applicable observations omitted/);
+});
+
+test('untruncated and zero-filter summaries do not invent server omissions or erase returned evidence', () => {
+  const view={cards:[{id:'one',status:'supported'},{id:'two',status:'needs_review'}],limits:{max_cards:200,truncated:false,omitted_observations:0}};
+  const summary=lens.reviewSummary(view,0);
+  assert.match(summary,/2 review cards returned/);assert.match(summary,/1 supported candidate in this returned set/);assert.match(summary,/0 shown by current filter/);
+  assert.doesNotMatch(summary,/display is capped|server limit|No applicable review candidates/);
+  const empty=lens.reviewSummary({cards:[],limits:{truncated:false}},0);
+  assert.match(empty,/0 supported candidates/);assert.match(empty,/No applicable review candidates were recorded/);
+  assert.doesNotMatch(empty,/display is capped|server limit/);
+  const cappedEmpty=lens.reviewSummary({cards:[],limits:{truncated:true,max_cards:200,omitted_observations:5}},0);
+  assert.match(cappedEmpty,/0 review cards returned/);assert.match(cappedEmpty,/0 shown by current filter/);assert.match(cappedEmpty,/5 additional recorded per-frame observations/);
+  assert.doesNotMatch(cappedEmpty,/No applicable review candidates were recorded/);
+});
+
+test('filtering an open capped review keeps the server cap and supported-count scope visible', async () => {
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};
+    if(path==='/api/violation-llm')return {available:false};
+    if(path==='/api/run?id=capped')return {id:'capped',source:'clip.mp4',status:{state:'complete',progress:1}};
+    if(path==='/api/violation-review?id=capped')return {run_id:'capped',fingerprint:'fp',cards:[{id:'one',rule:'speed',status:'supported'}],limits:{truncated:true,max_cards:200,omitted_observations:2592}};
+  },'capped');
+  await harness.settle();
+  assert.match(harness.element('review-summary').textContent,/1 shown by current filter/);
+  harness.element('rule-filter').value='priority';harness.element('rule-filter').listeners.change();
+  assert.equal(harness.element('cards').innerHTML,'');
+  const summary=harness.element('review-summary').textContent;
+  assert.match(summary,/0 shown by current filter/);assert.match(summary,/1 supported candidate in this returned set/);assert.match(summary,/Review display is capped at 200 cards/);assert.match(summary,/2592 additional recorded per-frame observations/);
+});
+
 test('explanations are unavailable by default and explicit consent is visible when available', () => {
   const card={id:'c',facts:[{id:'fact',text:'A recorded fact'}]};
   const unavailable=lens.renderCard(card,0,{available:false});
