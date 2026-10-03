@@ -243,6 +243,200 @@ def test_uncertain_refresh_clears_grant_and_never_retries_rotating_token(service
     assert service.store.value["registration"]["client_id"] == "oaiapp_fixture"
 
 
+@pytest.mark.parametrize("failure", [OSError("synthetic private storage detail"),
+                                    AuthError("synthetic private DPAPI detail", "secure_storage_unavailable")],
+                         ids=["disk", "dpapi"])
+def test_refresh_cannot_start_when_pending_marker_cannot_be_persisted(service, monkeypatch, failure):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    previous = deepcopy(service.store.value)
+    service.http.calls.clear()
+    def fail_save(value):
+        assert value["refresh_pending"] is True and "credential" not in value
+        raise failure
+    monkeypatch.setattr(service.store, "save", fail_save)
+    with pytest.raises(AuthError) as error:
+        service.grant()
+    assert error.value.code == "secure_storage_unavailable"
+    assert "synthetic private" not in str(error.value)
+    assert not service.http.calls and service.store.value == previous
+
+
+def _reopened_fixture(service):
+    """A fresh service sees only persisted memory bytes, never previous locals."""
+    store = MemoryStore()
+    store.value = deepcopy(service.store.value)
+    return SubscriptionAuth(store=store, http=FakeHTTP(), identity_verifier=service._verify_override)
+
+
+def test_post_rotation_persistence_failure_never_replays_old_token(service, monkeypatch):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    registration = deepcopy(service.store.value["registration"])
+    host_id = service.store.value["host_id"]
+    service.http.calls.clear()
+    original_save, original_json = service.store.save, service.http.json
+    def fail_final_save(value):
+        if "credential" in value:
+            raise OSError("synthetic private disk path")
+        original_save(value)
+    def refresh_after_pending(url, **kwargs):
+        assert service.store.value["refresh_pending"] is True
+        assert "credential" not in service.store.value
+        return original_json(url, **kwargs)
+    monkeypatch.setattr(service.store, "save", fail_final_save)
+    monkeypatch.setattr(service.http, "json", refresh_after_pending)
+    with pytest.raises(AuthError, match="fresh sign-in") as error:
+        service.grant()
+    assert error.value.code == "secure_storage_unavailable" and "private" not in str(error.value)
+    assert len(service.http.calls) == 1
+    assert service.store.value == {"host_id": host_id, "registration": registration, "refresh_pending": True}
+    status = service.status()
+    assert not status["available"] and not status["connected"] and status["approval_required"]
+    assert "synthetic-access" not in json.dumps(status) and "synthetic-refresh" not in json.dumps(status)
+    with pytest.raises(AuthError, match="fresh sign-in"):
+        service.grant()
+    reopened = _reopened_fixture(service)
+    with pytest.raises(AuthError, match="fresh sign-in"):
+        reopened.grant()
+    assert len(service.http.calls) == 1 and not reopened.http.calls
+
+
+@pytest.mark.parametrize("failure", [AuthError("synthetic response secret", "invalid_grant"),
+                                    AuthError("synthetic transport secret", "timeout")], ids=["invalid-grant", "timeout"])
+def test_failed_refresh_retains_durable_pending_state_without_cleanup_write(service, monkeypatch, failure):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    service.http.calls.clear()
+    service.http.tokens = failure
+    save = service.store.save
+    writes = []
+    def only_pending_write(value):
+        writes.append(deepcopy(value))
+        assert len(writes) == 1  # Recovery must not depend on a second disk write.
+        save(value)
+    monkeypatch.setattr(service.store, "save", only_pending_write)
+    with pytest.raises(AuthError) as error:
+        service.grant()
+    assert error.value.code == failure.code and "synthetic" not in str(error.value)
+    assert service.store.value["refresh_pending"] is True and "credential" not in service.store.value
+    reopened = _reopened_fixture(service)
+    with pytest.raises(AuthError):
+        reopened.grant()
+    assert not reopened.http.calls and len(service.http.calls) == 1
+
+
+def test_process_interruption_during_refresh_leaves_no_replayable_credential(service, monkeypatch):
+    class SyntheticInterruption(BaseException):
+        pass
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    def interrupted_request(*args, **kwargs):
+        assert service.store.value["refresh_pending"] is True
+        raise SyntheticInterruption()
+    monkeypatch.setattr(service.http, "json", interrupted_request)
+    with pytest.raises(SyntheticInterruption):
+        service.grant()
+    reopened = _reopened_fixture(service)
+    with pytest.raises(AuthError, match="fresh sign-in"):
+        reopened.grant()
+    assert not reopened.http.calls and "credential" not in reopened.store.value
+
+
+def test_uncertain_final_write_that_committed_uses_new_grant_without_rotation(service, monkeypatch):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    service.http.calls.clear()
+    service.http.tokens = token_response(access_token="synthetic-rotated", refresh_token="synthetic-rotated-refresh")
+    save = service.store.save
+    def commit_then_fail(value):
+        save(value)
+        if "credential" in value:
+            raise OSError("synthetic failure after atomic replacement")
+    monkeypatch.setattr(service.store, "save", commit_then_fail)
+    with pytest.raises(AuthError):
+        service.grant()
+    reopened = _reopened_fixture(service)
+    assert reopened.grant().access_token == "synthetic-rotated"
+    assert "refresh_pending" not in reopened.store.value
+    assert not reopened.http.calls and len(service.http.calls) == 1
+
+
+def test_other_service_waits_for_in_progress_refresh_then_uses_new_grant(service, monkeypatch):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    service.http.calls.clear()
+    service.http.tokens = token_response(access_token="synthetic-rotated", refresh_token="synthetic-rotated-refresh")
+    other = SubscriptionAuth(store=service.store, http=service.http, identity_verifier=service._verify_override)
+    entered, release, second_waiting = threading.Event(), threading.Event(), threading.Event()
+    original_json, original_transaction = service.http.json, service.store.transaction
+    def blocked_refresh(url, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return original_json(url, **kwargs)
+    @contextmanager
+    def observed_transaction():
+        if threading.current_thread().name == "second-refresh":
+            second_waiting.set()
+        with original_transaction():
+            yield
+    monkeypatch.setattr(service.http, "json", blocked_refresh)
+    monkeypatch.setattr(service.store, "transaction", observed_transaction)
+    values, errors = [], []
+    def call(auth):
+        try:
+            values.append(auth.grant())
+        except BaseException as error:
+            errors.append(type(error).__name__)
+    first = threading.Thread(target=call, args=(service,))
+    second = threading.Thread(target=call, args=(other,), name="second-refresh")
+    try:
+        first.start()
+        assert entered.wait(3)
+        second.start()
+        assert second_waiting.wait(3)
+    finally:
+        release.set()
+        first.join(3)
+        if second.ident is not None:
+            second.join(3)
+    assert not first.is_alive() and not second.is_alive() and not errors
+    assert len(values) == 2 and all(value.access_token == "synthetic-rotated" for value in values)
+    assert len(service.http.calls) == 1 and "refresh_pending" not in service.store.value
+
+
+def test_fresh_authorized_sign_in_recovers_pending_record_with_same_registration(service):
+    connect(service)
+    registration = deepcopy(service.store.value["registration"])
+    host = service.store.value["host_id"]
+    service.store.value.pop("credential")
+    service.store.value["refresh_pending"] = True
+    assert not service.status()["available"]
+    assert connect(service)["connected"] is True
+    assert service.store.value["registration"] == registration and service.store.value["host_id"] == host
+    assert "refresh_pending" not in service.store.value
+
+
+def test_expired_grant_without_refresh_permission_never_mutates_or_calls(service):
+    connect(service)
+    service.store.value["credential"]["expires_at"] = 0
+    previous, saves = deepcopy(service.store.value), service.store.saves
+    service.http.calls.clear()
+    with pytest.raises(AuthError, match="renewal"):
+        service.grant(refresh=False)
+    assert service.store.value == previous and service.store.saves == saves and not service.http.calls
+
+
+def test_disconnect_clears_pending_marker_without_reusing_lost_grant(service):
+    connect(service)
+    service.store.value.pop("credential")
+    service.store.value["refresh_pending"] = True
+    service.http.calls.clear()
+    result = service.disconnect(True)
+    assert not result["available"] and result["remote_revoked"] is False
+    assert "refresh_pending" not in service.store.value and not service.http.calls
+
+
 def test_disconnect_revokes_then_retains_mapping_and_host(service):
     connect(service)
     host = service.store.value["host_id"]

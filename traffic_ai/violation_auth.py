@@ -279,6 +279,10 @@ class SubscriptionAuth:
             return result
         try:
             record = self.store.load()
+            if record.get("refresh_pending"):
+                result.update(message="The previous ChatGPT renewal did not finish safely. Sign in again.",
+                              code="authorization_required")
+                return result
             credential = record.get("credential")
             if credential:
                 scopes = set(credential.get("scopes", []))
@@ -416,6 +420,7 @@ class SubscriptionAuth:
                 raise AuthError("The sign-in used a different ChatGPT account.", "identity_mismatch")
             credential = self._credential(tokens, client_id, claims)
             record.pop("pending_client_id", None)
+            record.pop("refresh_pending", None)
             record.update(registration={"client_id": client_id, "subject": claims["sub"]}, credential=credential)
             self.store.save(record)
         return self.status()
@@ -423,14 +428,31 @@ class SubscriptionAuth:
     def grant(self, refresh=True):
         # Called only after per-explanation consent. Serialize the whole refresh and
         # atomic replacement across threads/processes; never replay a rotating token.
-        if not self.store.load().get("credential"):
+        initial = self.store.load()
+        if not initial.get("credential") and not initial.get("refresh_pending"):
             raise AuthError("Continue with ChatGPT before requesting an explanation.", "authorization_required")
         with self.store.transaction():
             record = self.store.load()
+            if record.get("refresh_pending"):
+                raise AuthError("The ChatGPT session needs a fresh sign-in after an unfinished renewal.", "authorization_required")
             credential = record.get("credential", {})
+            if not credential:
+                raise AuthError("Continue with ChatGPT before requesting an explanation.", "authorization_required")
             if credential.get("expires_at", 0) <= time.time() + 30:
                 if not refresh:
                     raise AuthError("The ChatGPT grant needs renewal.", "authorization_required")
+                # Commit a fail-closed state BEFORE using a rotating token. Keeping
+                # the old credential only in this transaction means a crash, lost
+                # response or failed final write cannot replay it on the next call
+                # (including a call from another process). If this write fails,
+                # no request has left the machine and no rotation is attempted.
+                pending = {key: value for key, value in record.items() if key != "credential"}
+                pending["refresh_pending"] = True
+                try:
+                    self.store.save(pending)
+                except (AuthError, OSError):
+                    raise AuthError("Protected storage is unavailable. Restore access before renewing ChatGPT or signing in again.",
+                                    "secure_storage_unavailable") from None
                 try:
                     tokens = self.http.json(TOKEN, form=True, data={"grant_type": "refresh_token",
                         "client_id": credential["client_id"], "refresh_token": credential["refresh_token"],
@@ -446,13 +468,16 @@ class SubscriptionAuth:
                             raise AuthError("The refreshed grant changed account identity.", "identity_mismatch")
                     credential = self._credential(tokens, credential["client_id"], claims, credential)
                     record["credential"] = credential
+                    record.pop("refresh_pending", None)
                     self.store.save(record)
-                except AuthError as error:
-                    # An uncertain refresh may have rotated remotely. Clear credentials
-                    # and require fresh sign-in instead of retrying the old refresh token.
-                    record.pop("credential", None)
-                    self.store.save(record)
-                    raise AuthError("The ChatGPT session needs a fresh sign-in.", error.code) from None
+                except (AuthError, OSError, KeyError, TypeError, ValueError) as error:
+                    # The durable pending record already excludes the old token.
+                    # Do not depend on another cleanup write: storage may be the
+                    # failure, or the successful replacement may have committed.
+                    code = error.code if isinstance(error, AuthError) else (
+                        "secure_storage_unavailable" if isinstance(error, OSError) else "invalid_grant")
+                    raise AuthError("The ChatGPT renewal could not be safely completed. Restore storage access if needed, then use a fresh sign-in.",
+                                    code) from None
             grant = SubscriptionGrant(credential["access_token"], credential["client_id"],
                                       credential["subject"], frozenset(credential["scopes"]), credential["expires_at"])
             if not grant.valid():
@@ -478,6 +503,8 @@ class SubscriptionAuth:
                 except AuthError:
                     pass
                 record.pop("credential", None)
+            if credential or record.get("refresh_pending"):
+                record.pop("refresh_pending", None)
                 self.store.save(record)
         result = self.status()
         result["remote_revoked"] = remote_revoked

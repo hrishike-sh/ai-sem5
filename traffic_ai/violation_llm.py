@@ -238,7 +238,8 @@ def _completed_selection(response, deadline):
             raise ExplanationError("The model stream returned an invalid event type.")
         if kind in {"response.failed", "response.incomplete", "response.error", "error"}:
             failure = event.get("response", {}).get("error", {}) if isinstance(event.get("response"), dict) else event
-            if isinstance(failure, dict) and failure.get("code") in {
+            failure_code = failure.get("code") if isinstance(failure, dict) else None
+            if isinstance(failure_code, str) and failure_code in {
                     "subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable"}:
                 raise ExplanationError("ChatGPT plan usage is unavailable or at its limit. Manage usage in ChatGPT settings.", "usage_limit")
             raise ExplanationError("ChatGPT did not complete this explanation. Check plan usage or try later.", "incomplete_response")
@@ -300,7 +301,13 @@ def _completed_selection(response, deadline):
                     or not isinstance(content.get("text"), str)):
                 raise ExplanationError("The model did not supply a structured selection.")
             texts.append(content["text"])
-    if len(texts) != 1 or len(texts[0].encode()) > 16384:
+    if len(texts) != 1:
+        raise ExplanationError("The model returned an oversized or ambiguous explanation.")
+    try:
+        text_size = len(texts[0].encode("utf-8"))
+    except UnicodeEncodeError:
+        raise ExplanationError("The model returned invalid Unicode text.") from None
+    if text_size > 16384:
         raise ExplanationError("The model returned an oversized or ambiguous explanation.")
     return strict_json(texts[0]), completed.get("model")
 

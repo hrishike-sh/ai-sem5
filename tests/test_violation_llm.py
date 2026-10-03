@@ -49,6 +49,33 @@ def final_event(output=None):
                                                         "output": output if output is not None else []}}
 
 
+@pytest.mark.parametrize("failure_code", [[], {}, ["subscription_sharing_usage_limit_exceeded"]])
+@pytest.mark.parametrize("nested", [False, True])
+def test_malformed_failure_code_is_a_safe_incomplete_response(card, failure_code, nested):
+    failure = {"code": failure_code}
+    failure_event = ({"type": "response.failed", "response": {"error": failure}} if nested
+                     else {"type": "error", **failure})
+    # An error after a valid completion must still invalidate the entire result.
+    service, _, _ = explainer(card, completed(selection(card)) + event(failure_event))
+    with pytest.raises(ExplanationError) as error:
+        service.explain(card, True)
+    assert error.value.code == "incomplete_response"
+
+
+@pytest.mark.parametrize("text", ["\ud800", "\udfff"])
+@pytest.mark.parametrize("item_events", [False, True])
+def test_unpaired_surrogate_text_is_a_safe_model_error(card, text, item_events):
+    if item_events:
+        done = done_message(card)
+        done["item"]["content"][0]["text"] = text
+        stream = event(done) + event(final_event())
+    else:
+        stream = completed(text)
+    service, _, _ = explainer(card, stream)
+    with pytest.raises(ExplanationError, match="invalid Unicode"):
+        service.explain(card, True)
+
+
 @pytest.mark.parametrize("populated_final", [False, True])
 def test_completed_item_replay_with_empty_or_matching_final(card, populated_final):
     done = done_message(card)
