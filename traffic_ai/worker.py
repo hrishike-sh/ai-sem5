@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ivp.jobs import job_lock
-from ivp.media import load_image, png_bytes, write_json
+from ivp.media import load_image, png_bytes, source_revision, write_json
 from ivp.pipeline import Settings, process_frame
 from ivp.worker import Cancelled, check_cancel, process_video, update
 
@@ -15,10 +15,22 @@ from .analyzer import Analyzer
 from .render import annotate_detections
 
 
+def _check_image_source(source, expected=None):
+    try:
+        revision = source_revision(source)
+    except OSError as exc:
+        raise ValueError("Source image is no longer available. Reopen it before retrying.") from exc
+    if expected and revision != expected:
+        raise ValueError("Source image changed after preview or during analysis. Reopen it before retrying.")
+    return revision
+
+
 def process_run(run):
     request = json.loads((run / "request.json").read_text(encoding="utf-8"))
     try:
         check_cancel(run)
+        image_revision = (_check_image_source(request["source"], request["info"].get("source_revision"))
+                          if request["info"]["kind"] == "image" else None)
         analyzer = Analyzer(status=lambda text: update(run, "running", progress=0, message=text), cancel=lambda: check_cancel(run))
         settings = Settings(**request["settings"])
         saved_scene_revision = 0
@@ -92,22 +104,33 @@ def process_run(run):
             if request["info"]["kind"] == "video":
                 process_video(run, frame_hook=hook, final_hook=finish)
             else:
+                check_cancel(run)
+                _check_image_source(request["source"], image_revision)
                 original = load_image(request["source"])
+                check_cancel(run)
+                _check_image_source(request["source"], image_revision)
                 result = process_frame(original, settings, include_features=False, include_stages=False)
                 rgb = hook(result, original, 0, 0)
                 check_cancel(run)
+                _check_image_source(request["source"], image_revision)
                 (run / "processed.png").write_bytes(png_bytes(rgb))
                 write_json(run / "coordinates.json", {"source_size": result.source_size, "processed_size": [rgb.shape[1], rgb.shape[0]],
                            "transform_to_source_pixel_centres": result.transform_to_source.tolist()})
+                summary = finish()
+                _check_image_source(request["source"], image_revision)
                 write_json(run / "report.json", {"schema_version": 1, "kind": "image", "source": Path(request["source"]).name,
-                           "settings": settings.to_dict(), "ai": finish()})
+                           "settings": settings.to_dict(), "ai": summary})
                 check_cancel(run)
+                _check_image_source(request["source"], image_revision)
                 update(run, "complete", progress=1, message="AI image analysis ready.")
     except Cancelled:
         for name in ("processed.png", "report.json"):
             (run / name).unlink(missing_ok=True)
         update(run, "cancelled", progress=0, message="AI processing cancelled. Original upload is unchanged.")
     except Exception as exc:
+        if request["info"]["kind"] == "image":
+            for name in ("processed.png", "report.json"):
+                (run / name).unlink(missing_ok=True)
         update(run, "failed", progress=0, message=f"AI processing failed: {exc}. See worker.log; run Setup-AI.ps1 if dependencies are missing.")
         raise
 

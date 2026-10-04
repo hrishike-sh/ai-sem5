@@ -76,6 +76,8 @@ def test_explicit_helmet_evidence_supported_but_never_a_legal_finding(saved):
     assert 'not live inference' in view['provenance_notice']
     assert 'not a legal finding' in view['limits']['notice']
     assert card['review'] == {'decision': None, 'note': ''}
+    assert view['source_readiness']['available'] is True
+    assert view['source_readiness']['revision_kind'] == 'metadata'
 
 
 @pytest.mark.parametrize('evidence', [{}, {'helmet_count': 0}, {'heads': []}, {'heads': [[1, 1, 3, 3]]},
@@ -144,6 +146,58 @@ def test_priority_rules_are_retained_when_other_rules_fill_card_limit(saved, mon
     view = review.view(run.name)
     assert [card['rule'] for card in view['cards']] == ['helmet_absence', 'wrong_way']
     assert view['limits']['omitted_observations'] == 2
+
+
+@pytest.mark.parametrize('verdicts,selected_index', [
+    (['cannot_assess', 'no_violation_observed', 'cannot_assess'], 1),
+    (['no_violation_observed', 'cannot_assess'], 0),
+    (['cannot_assess', 'cannot_assess'], 0),
+    (['no_violation_observed', 'violation', 'cannot_assess'], 1),
+])
+def test_group_preserves_completed_negative_over_initial_unknown(saved, verdicts, selected_index):
+    review, run, _, _ = saved
+    set_video(saved)
+    write_frames(run, [frame(decision('wrong_way', {}, verdict=verdict, stamp=index), stamp=index)
+                       for index, verdict in enumerate(verdicts)])
+    original = (run / 'detections.jsonl').read_bytes()
+    card = review.view(run.name)['cards'][0]
+    assert card['recorded_verdict'] == verdicts[selected_index]
+    assert card['timestamp'] == selected_index
+    assert card['observation_count'] == len(verdicts)
+    assert (card['first_timestamp'], card['last_timestamp']) == (0, len(verdicts)-1)
+    assert card['status'] == 'insufficient_evidence'
+    if verdicts[selected_index] == 'no_violation_observed':
+        assert card['reason'] == ('The recorded rule did not observe its positive condition. '
+                                  'This is one observation, not proof that the whole clip is clear.')
+        assert card['missing_facts']
+    assert (run / 'detections.jsonl').read_bytes() == original
+
+
+@pytest.mark.parametrize('change', ['replace', 'remove'])
+def test_source_readiness_warns_without_rewriting_historical_assessments(saved, change):
+    review, run, source, files = saved
+    data = bound(saved)
+    before = review.decide({**data, 'decision': 'reject', 'note': 'Historical reviewer note'})
+    original_exports = {name: (run / name).read_bytes() for name in before['provenance']['source_hashes']}
+    if change == 'replace':
+        source.write_bytes(png_bytes(np.full((8, 8, 3), 255, np.uint8)))
+    else:
+        source.unlink()
+    after = review.view(run.name)
+    assert after['source_readiness']['available'] is False
+    assert 'Historical saved assessments remain available' in after['source_readiness']['reason']
+    assert after['fingerprint'] == before['fingerprint']
+    assert after['cards'] == before['cards']
+    assert after['cards'][0]['status'] == 'supported'
+    changed_note = review.decide({**data, 'decision': 'reject', 'note': 'Reviewed saved output; media unavailable'})
+    assert changed_note['source_readiness']['available'] is False
+    assert changed_note['cards'][0]['review']['note'] == 'Reviewed saved output; media unavailable'
+    exported = review.export(data)
+    report = json.loads(files.paths[exported['url']].read_text())
+    assert report['source_readiness'] == after['source_readiness']
+    assert report['cards'][0]['status'] == 'supported'
+    assert report['fingerprint'] == before['fingerprint']
+    assert all((run / name).read_bytes() == payload for name, payload in original_exports.items())
 
 
 @pytest.mark.parametrize('association', [None, {'state': 'red', 'associated_approach': 'different', 'timestamp': 0, 'model_score': .9},

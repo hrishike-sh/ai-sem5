@@ -142,6 +142,35 @@ def test_moving_red_crossing_is_not_stopped_encroachment():
     assert all(result[Rule.STOP_LINE] != Verdict.VIOLATION for result in results)
 
 
+@pytest.mark.parametrize('middle_x,expected', [(50, Verdict.VIOLATION), (59, Verdict.CLEAR), (80, Verdict.CLEAR)])
+def test_synthetic_crossing_requires_all_observed_positions_to_be_stationary(middle_x, expected):
+    engine = RuleEngine()
+    for timestamp, x in [(0., 50), (.5, middle_x), (1., 50)]:
+        configured = scene(timestamp)
+        configured.crossing_polygon = [(0, 0), (100, 0), (100, 100), (0, 100)]
+        decisions = engine.evaluate(vehicle(x=x, y=60), timestamp, configured, video=True)
+    crossing = next(d for d in decisions if d.rule == Rule.CROSSING)
+    assert crossing.verdict == expected
+    measured = crossing.evidence['crossing_occupancy']
+    assert measured['observed_span_seconds'] == 1.
+    assert measured['maximum_displacement_pixels'] == middle_x - 50
+    assert measured['sustained_stopped_occupancy'] is (expected == Verdict.VIOLATION)
+
+
+def test_synthetic_crossing_requires_one_second_in_the_current_occupancy_window():
+    engine = RuleEngine()
+    for timestamp in (0., .75, 1.5, 1.51, 1.76):
+        configured = scene(timestamp, 'green' if timestamp == 0 else 'red')
+        configured.crossing_polygon = [(0, 0), (100, 0), (100, 100), (0, 100)]
+        decisions = engine.evaluate(vehicle(y=60), timestamp, configured, video=True)
+        crossing = next(d for d in decisions if d.rule == Rule.CROSSING)
+        if timestamp == 1.51:
+            assert crossing.verdict != Verdict.VIOLATION
+            assert crossing.evidence['crossing_occupancy']['observed_span_seconds'] == pytest.approx(.76)
+    assert crossing.verdict == Verdict.VIOLATION
+    assert crossing.evidence['crossing_occupancy']['observed_span_seconds'] == pytest.approx(1.01)
+
+
 def test_tracking_gap_cannot_bridge_a_red_crossing():
     engine = RuleEngine()
     engine.evaluate(vehicle(y=40), 0, scene(), video=True)

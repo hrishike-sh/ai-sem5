@@ -123,6 +123,7 @@ class RuleEngine:
                 decide(rule, Verdict.UNKNOWN, "Obstruction requires sustained occupancy in video")
             else:
                 violation = False
+                crossing_occupancy = None
                 if red and in_approach:
                     if rule == Rule.RED_LIGHT:
                         anchor = next((p for p in reversed(track) if signed_distance(p[1], scene.stop_line) < -3), None)
@@ -137,13 +138,22 @@ class RuleEngine:
                                              and hypot(point[0] - p[1][0], point[1] - p[1][1]) <= tolerance for p in recent))
                     else:
                         recent = [p for p in track if timestamp - p[0] <= 1.5]
+                        observed_span = timestamp - recent[0][0] if recent else 0.
+                        maximum_displacement = max((hypot(point[0] - p[1][0], point[1] - p[1][1])
+                                                    for p in recent), default=0.)
                         violation = (point_in_polygon(point, scene.crossing_polygon) and bool(recent)
+                                     and observed_span >= 1
                                      and all(p[2] and point_in_polygon(p[1], scene.crossing_polygon) for p in recent)
-                                     and hypot(point[0] - recent[0][1][0], point[1] - recent[0][1][1]) < 8)
+                                     and maximum_displacement < 8)
+                        crossing_occupancy = {"observed_span_seconds": observed_span,
+                                              "maximum_displacement_pixels": maximum_displacement,
+                                              "stationary_tolerance_pixels": 8,
+                                              "sustained_stopped_occupancy": violation}
                 decide(rule, Verdict.VIOLATION if violation else Verdict.CLEAR, "Observed approach geometry and associated signal evaluated", signal=scene.signal_state,
                        signal_association=scene.source_evidence.get("signal_association"), stop_line=scene.stop_line,
                        approach_id=scene.source_evidence.get("approach", {}).get("id"),
                        crossing_association=scene.source_evidence.get("crossing_association") if rule == Rule.CROSSING else None,
+                       crossing_occupancy=crossing_occupancy if rule == Rule.CROSSING else None,
                        observed_red_entry=self.stop_entries.get(vehicle.track_id) if rule == Rule.STOP_LINE else None)
 
         for rule in (Rule.WRONG_WAY, Rule.FOOTPATH, Rule.RESTRICTED, Rule.TURN):

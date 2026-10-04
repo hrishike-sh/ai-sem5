@@ -192,7 +192,7 @@ class ViolationReview:
                     card.update(scene_id=scene, source={'file': 'detections.jsonl', 'line': line_no,
                                 'pointer': f'/decisions/{index}', 'line_sha256': hashlib.sha256(raw).hexdigest()})
                     rank = ({'insufficient_evidence': 0, 'needs_review': 1, 'supported': 2}[card['status']],
-                            decision['verdict'] == 'violation')
+                            {'cannot_assess': 0, 'no_violation_observed': 1, 'violation': 2}[decision['verdict']])
                     if key in groups:
                         previous = groups[key]
                         count = previous['observation_count'] + 1
@@ -223,6 +223,7 @@ class ViolationReview:
             card['synthetic'] = True if synthetic else None
         result = {'run_id': run_id, 'fingerprint': fingerprint, 'cards': cards, 'synthetic': True if synthetic else None,
                   'source_name': Path(request.get('source', '')).name,
+                  'source_readiness': self._source_readiness(request),
                   'omitted_nonapplicable_count': nonapplicable,
                   'provenance_notice': 'Synthetic recorded fixture or demonstration; not live inference or evaluation data.' if synthetic else
                       'Recorded algorithm output; synthetic provenance is unrecorded.',
@@ -432,6 +433,9 @@ class ViolationReview:
         reason = ('Recorded evidence supports this candidate for human review; no legal conclusion.' if status == 'supported'
                   else 'Recorded evidence needs contextual human review.' if status == 'needs_review'
                   else 'Required evidence is missing: ' + '; '.join(item['text'] for item in missing))
+        if verdict == 'no_violation_observed':
+            reason = ('The recorded rule did not observe its positive condition. '
+                      'This is one observation, not proof that the whole clip is clear.')
         return {'rule': rule, 'status': status, 'timestamp': decision['timestamp'],
                 'track_id': decision.get('track_id'), 'reason': reason, 'facts': facts,
                 'missing_facts': missing, 'recorded_verdict': verdict}
@@ -498,6 +502,19 @@ class ViolationReview:
         if source_revision(path) != revision:
             raise ValueError('Original source changed since analysis; frames are unavailable.')
         return path, revision
+
+    def _source_readiness(self, request):
+        """Dynamic media availability, separate from immutable saved assessments."""
+        try:
+            path, _ = self._source(request)
+            if not path.is_file():
+                raise ValueError('Original source is not an available media file.')
+        except (OSError, ValueError) as exc:
+            reason = str(exc) if isinstance(exc, ValueError) else 'Original source is unavailable or unreadable.'
+            return {'available': False, 'revision_kind': 'metadata',
+                    'reason': reason + ' Historical saved assessments remain available; current evidence frames cannot be verified.'}
+        return {'available': True, 'revision_kind': 'metadata',
+                'reason': 'Original source matches the recorded local file revision; frame decoding has not been checked.'}
 
     def frames(self, data):
         with self.lock:
