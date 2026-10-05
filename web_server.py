@@ -33,6 +33,9 @@ from traffic_ai.violation_review import ViolationReview
 from traffic_ai.violation_preparation import EvidencePreparations
 from traffic_ai.violation_llm import SubscriptionExplainer
 from traffic_ai.violation_auth import SubscriptionAuth, AuthError
+from traffic_ai.violation_demo import create_demo
+from traffic_ai.direct_review import DirectReview
+from traffic_ai.direct_vision import DirectVisionReviewer
 from http.cookies import SimpleCookie
 
 WEB = ROOT / "web"
@@ -157,6 +160,7 @@ class Lab:
         self.scene_reviews = SceneReviews(ROOT, self.executor)
         self.violation_reviews = ViolationReview(ROOT, self.files)
         self.violation_preparations = EvidencePreparations(self.violation_reviews)
+        self.direct_reviews = DirectReview(ROOT, self.files)
         self.token = secrets.token_urlsafe(32)
 
     def close(self):
@@ -434,6 +438,23 @@ class Lab:
                 **({'demonstration': demo_view(run, details, self.files)} if status.get('state') == 'complete' and 'ivp_demo' in details else {})}
 
     def post(self, route, data):
+        if route == '/api/direct-prepare':
+            source, info = self._source(data)
+            return self.direct_reviews.prepare(source, info, timestamp=data.get('timestamp', 0))
+        if route == '/api/direct-analyze':
+            if data.get('consent') is not True:
+                raise ValueError('Preview the exact image and approve sending it to Astra first.')
+            prepared = self.direct_reviews.load(data)
+            result = self.direct_vision.review(prepared['images'], consent=True)
+            self.direct_reviews.load(data)
+            return self.direct_reviews.save_result(data, {**result, 'review_id': data['review_id'],
+                                                          'fingerprint': data['fingerprint']})
+        if route == '/api/direct-decision':
+            return self.direct_reviews.decide(data)
+        if route == '/api/direct-export':
+            return self.direct_reviews.export(data)
+        if route == '/api/violation-demo':
+            return create_demo(ROOT, data)
         if route == '/api/violation-decision':
             return self.violation_reviews.decide(data)
         if route == '/api/violation-frames':
@@ -686,6 +707,12 @@ def create_server(port=8521):
                     return
                 if route == '/api/violation-llm':
                     return self.respond(lab.violation_explainer.status())
+                if route == '/api/direct-review':
+                    with lab.lock:
+                        return self.respond(lab.direct_reviews.view(query.get('id', [None])[0]))
+                if route == '/api/direct-library':
+                    with lab.lock:
+                        return self.respond(lab.direct_reviews.recent())
                 if route == '/api/violation-review':
                     with lab.lock:
                         return self.respond(lab.violation_reviews.view(query.get('id', [None])[0]))
@@ -719,6 +746,7 @@ def create_server(port=8521):
                 static = {"/": "violation_lens.html", "/ai": "violation_lens.html", "/ai/": "violation_lens.html",
                           "/studio": "index.html", "/studio/": "index.html",
                           "/violation_lens.js": "violation_lens.js", "/violation_lens.css": "violation_lens.css",
+                          "/direct_review.js": "direct_review.js",
                           "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
                 if route not in static:
                     return self.respond({"error": "Not found"}, 404)
@@ -815,6 +843,7 @@ def create_server(port=8521):
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     lab.violation_auth = SubscriptionAuth(callback_uri=f'http://127.0.0.1:{server.server_port}/auth/callback')
     lab.violation_explainer = SubscriptionExplainer(auth=lab.violation_auth)
+    lab.direct_vision = DirectVisionReviewer(auth=lab.violation_auth)
     server.daemon_threads = True
     server.lab = lab
     return server

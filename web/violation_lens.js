@@ -99,12 +99,14 @@
       <p class="card-feedback" data-slot="feedback" role="status" aria-live="polite"></p></div></article>`;
   }
   const helpers = {escapeHTML,localURL,authURL,timestamp,progress,runActive,priority,visibleCards,disposition,reviewSummary,reviewPayload,readiness,validatePreparation,preparedPayload,renderPreparation,renderExplanation,renderFrames,renderCard};
+  root.ViolationLens=helpers;
   if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
   if (!root.document) return;
 
   const $ = id => root.document.getElementById(id);
   const token = root.document.querySelector('meta[name="traffic-token"]')?.content;
-  const state = {config:null,media:null,run:null,review:null,llm:{available:false},busy:false,upload:null,generation:0,timer:null,cancelPending:false,library:[],before:null,libraryBusy:false,reviewBusy:false,pendingCards:0,drafts:new Map(),preparations:new Map()};
+  const state = {config:null,media:null,run:null,review:null,llm:{available:false},busy:false,upload:null,generation:0,pollRequest:0,reviewRequest:0,reviewLoading:false,timer:null,cancelPending:false,library:[],before:null,libraryBusy:false,reviewBusy:false,pendingCards:0,drafts:new Map(),preparations:new Map()};
+  const busyCards=new WeakSet();
   const storageKey = 'violation-lens-current-run';
   function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = !message; $('notice').classList.toggle('error', error); }
   function remember(id) { try { root.localStorage.setItem(storageKey, id); } catch { notice('This browser cannot remember the current run. Use Saved runs after a reload.'); } }
@@ -122,6 +124,8 @@
     $('start').disabled = !state.media || !!locked || !readiness(state.config).ready;
     $('start').textContent=state.media&&state.run&&!active?'Run detection again':'Run detection';
     $('cancel-upload').hidden=!state.upload;
+    const demoLocked=!!locked||state.pendingCards>0||state.reviewBusy||state.reviewLoading;
+    $('demo-run').disabled=demoLocked;$('demo-scenario').disabled=demoLocked;
     $('next-action').textContent=state.upload?'Wait for the upload to finish before starting detection.':active?'Detection is in progress. You can cancel it or return to the saved run later.':state.busy?'Opening or submitting your run…':state.review?(state.media?'Inspect the candidate evidence below, then save your review decisions.':'Saved run restored for review. To start a new detection, choose and upload the clip again.'):state.media?(readiness(state.config).ready?'Your clip is ready. Choose Run detection.':'Resolve the setup items above, then choose Recheck setup.'):state.run?'Choose a new clip to start another run, or reopen a completed run below.':'Choose and upload a permitted clip to begin.';
     $('cancel-run').hidden = !active; $('cancel-run').disabled = state.cancelPending;
     $('cancel-run').textContent = state.cancelPending ? 'Cancellation requested…' : 'Cancel detection';
@@ -144,8 +148,9 @@
     } catch (error) { state.config=null; $('connection').textContent='Connection unavailable';$('setup').hidden=false;$('setup-title').textContent='Local server connection needed';$('setup-message').textContent=error.message;$('setup-help').textContent='Check that the app server is running, then choose Recheck setup. Existing saved runs are kept on the server.'; notice(error.message,true); }
     actions();
   }
-  function clearReview() { state.review=null;state.drafts.clear();state.preparations.clear(); $('cards').replaceChildren(); $('review-tools').hidden=true;$('review-source').hidden=true;$('provenance-notice').hidden=true; $('review-summary').textContent='Complete a detection run or open a saved run to inspect its evidence.'; }
+  function clearReview() { state.review=null;state.reviewRequest++;state.reviewLoading=false;state.drafts.clear();state.preparations.clear(); $('cards').replaceChildren(); $('review-tools').hidden=true;$('review-source').hidden=true;$('source-readiness').hidden=true;$('source-readiness').textContent='';$('provenance-notice').hidden=true; $('review-summary').textContent='Complete a detection run or open a saved run to inspect its evidence.'; }
   function showRun(run) {
+    if(state.run?.id===run.id&&!runActive(state.run)&&runActive(run))return false;
     $('connection').textContent='Local server connected';
     state.run=run; remember(run.id); $('source-name').textContent = typeof run.source === 'string' ? run.source : run.source?.name || 'Saved source';
     $('run-progress-wrap').hidden=false;
@@ -155,17 +160,19 @@
     $('run-message').textContent=run.status?.message || (runActive(run) ? 'Waiting for the local worker…' : 'Run finished.');
     if (!runActive(run)) state.cancelPending=false;
     actions();
+    return true;
   }
   function schedulePoll(id, generation) { clearTimeout(state.timer); state.timer=root.setTimeout(()=>pollRun(id,generation),1800); }
   async function pollRun(id, generation) {
+    const request=++state.pollRequest;
     try {
       const run=await api('/api/run?id='+encodeURIComponent(id));
-      if (generation !== state.generation || state.run?.id !== id) return;
-      showRun(run);
+      if (generation !== state.generation || state.run?.id !== id || request!==state.pollRequest) return;
+      if(!showRun(run))return;
       if (runActive(run)) schedulePoll(id,generation);
       else if (run.status?.state === 'complete') { await loadReview(id,generation); loadLibrary(); }
       else { $('review-summary').textContent='Detection did not complete. Inspect its status above; saved evidence is not presented as a completed review.'; loadLibrary(); }
-    } catch(error) { if(generation === state.generation) { $('run-message').textContent='Could not refresh status: '+error.message+' Use Refresh status to retry; your saved run is retained.'; $('connection').textContent='Status connection interrupted'; } }
+    } catch(error) { if(generation === state.generation&&request===state.pollRequest) { $('run-message').textContent='Could not refresh status: '+error.message+' Use Refresh status to retry; your saved run is retained.'; $('connection').textContent='Status connection interrupted'; } }
   }
   async function openRun(id) {
     if(state.busy || state.upload) return;
@@ -180,6 +187,9 @@
   let shownCardCount=0;
   function drawCards() {
     state.preparations.clear();
+    const unavailable=state.review?.source_readiness?.available===false;
+    $('source-readiness').hidden=!unavailable;
+    $('source-readiness').textContent=unavailable?'Historical saved assessments and review decisions remain available. Current original frames cannot be verified. '+String(state.review.source_readiness.reason||'The original source is unavailable or has changed.'):'';
     const cards=visibleCards(state.review?.cards,$('rule-filter').value);
     $('provenance-notice').hidden=!state.review?.synthetic&&!state.review?.provenance_notice;
     $('provenance-notice').textContent=state.review?.provenance_notice||(state.review?.synthetic?'Synthetic test evidence. These fixtures demonstrate the review flow and do not establish real-world detection accuracy.':'');
@@ -188,9 +198,27 @@
     shownCardCount=cards.length;updateReviewSummary(shownCardCount);
   }
   async function loadReview(id,generation=state.generation) {
+    if(state.pendingCards>0&&state.review?.run_id===id)return;
+    const request=++state.reviewRequest;state.reviewLoading=true;actions();
     $('review-summary').textContent='Loading recorded evidence…';
-    try { const view=await api('/api/violation-review?id='+encodeURIComponent(id)); if(generation!==state.generation || state.run?.id!==id)return; if(view.run_id!==id || !view.fingerprint)throw Error('Evidence identity could not be verified.'); state.review=view; $('review-tools').hidden=false; drawCards(); actions(); }
-    catch(error){if(generation===state.generation){notice('Could not load review: '+error.message,true);$('review-summary').textContent='Review unavailable. Refresh the run status to retry.';}}
+    try { const view=await api('/api/violation-review?id='+encodeURIComponent(id)); if(generation!==state.generation || state.run?.id!==id || request!==state.reviewRequest)return; if(view.run_id!==id || !view.fingerprint)throw Error('Evidence identity could not be verified.');if(state.review&&state.review.fingerprint!==view.fingerprint)state.drafts.clear(); state.review=view; $('review-tools').hidden=false; drawCards(); actions(); }
+    catch(error){if(generation===state.generation&&request===state.reviewRequest){notice('Could not load review: '+error.message,true);$('review-summary').textContent='Review unavailable. Refresh the run status to retry.';}}
+    finally{if(generation===state.generation&&request===state.reviewRequest){state.reviewLoading=false;actions();}}
+  }
+  async function runDemo() {
+    if($('demo-run').disabled)return;
+    const scenario=$('demo-scenario').value;
+    if(!['opposing','following','unknown'].includes(scenario)){$('demo-message').textContent='Choose one of the three synthetic cases.';return;}
+    const generation=state.generation;state.busy=true;actions();$('demo-message').textContent='Creating the synthetic clip and computing its configured-direction rule…';
+    try {
+      const result=await api('/api/violation-demo',{scenario});
+      if(generation!==state.generation)return;
+      if(!result.id||result.synthetic!==true)throw Error('The server did not identify the result as a synthetic run.');
+      state.busy=false;actions();await openRun(result.id);
+      $('demo-message').textContent=state.run?.id===result.id?'Synthetic demo created. Its generated geometry and preset tracks are labeled in the review below.':'Synthetic demo created, but its review could not be opened. Refresh saved runs and open it again.';
+      loadLibrary();
+    }catch(error){if(generation===state.generation)$('demo-message').textContent='Synthetic demo could not be created: '+error.message+' Choose Open synthetic demo to retry.';}
+    finally{state.busy=false;actions();}
   }
   function uploadClip() {
     const file=$('clip').files?.[0]; if(!file || !$('rights').checked || state.upload || state.busy || (state.run&&runActive(state.run)))return;
@@ -215,19 +243,23 @@
   async function cancelRun() {
     if(!state.run||!runActive(state.run)||state.cancelPending)return;
     const id=state.run.id,generation=state.generation;state.cancelPending=true;actions();
-    try{await api('/api/cancel',{id});if(generation===state.generation){$('run-message').textContent='Cancellation requested. Waiting for the worker to stop…';schedulePoll(id,generation);}}
+    try{await api('/api/cancel',{id});if(generation===state.generation&&state.run?.id===id&&runActive(state.run)){$('run-message').textContent='Cancellation requested. Waiting for the worker to stop…';schedulePoll(id,generation);}}
     catch(error){if(generation===state.generation){state.cancelPending=false;notice('Cancellation could not be confirmed: '+error.message,true);actions();}}
+  }
+  function syncPreparedButton(article) {
+    const button=article.querySelector('[data-action="send-prepared"]');
+    if(button)button.disabled=!state.preparations.get(article.dataset.cardId)?.ready||busyCards.has(article);
   }
   function watchPreparedImages(article, prepared) {
     const record={prepared,ready:prepared.mode==='facts_only'};state.preparations.set(prepared.card_id,record);
     const button=article.querySelector('[data-action="send-prepared"]'),status=article.querySelector('[data-slot="preview-status"]');
-    if(record.ready){button.disabled=false;return;}
+    if(record.ready){syncPreparedButton(article);return;}
     const images=[...article.querySelectorAll('img[data-prepared-frame]')];
     const check=()=>{
       if(state.preparations.get(prepared.card_id)!==record||!article.isConnected)return;
       const failed=images.some(img=>img.complete&&!img.naturalWidth);
       record.ready=images.length===list(prepared.frames).filter(frame=>frame.available===true).length&&images.every(img=>img.complete&&img.naturalWidth>0);
-      button.disabled=!record.ready;
+      syncPreparedButton(article);
       status.textContent=failed?'One or more prepared images could not be displayed. Retry preparation, or explicitly choose structured facts only.':record.ready?'All prepared image previews are loaded. Review them before sending.':'Loading the exact prepared image previews…';
     };
     images.forEach(img=>{img.addEventListener('load',check);img.addEventListener('error',check);});check();
@@ -238,7 +270,7 @@
     const generation=state.generation,view=state.review,action=button.dataset.action,feedback=article.querySelector('[data-slot="feedback"]');
     const same=()=>generation===state.generation&&state.review?.run_id===view.run_id&&state.review?.fingerprint===view.fingerprint&&article.isConnected;
     const payload={id:view.run_id,card_id:id,fingerprint:view.fingerprint};
-    const buttons=[...article.querySelectorAll('button')];const disabled=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);state.pendingCards++;actions();feedback.textContent='Working…';
+    const buttons=[...article.querySelectorAll('button')];const disabled=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);busyCards.add(article);state.pendingCards++;state.reviewRequest++;state.reviewLoading=false;actions();feedback.textContent='Working…';
     try {
       if(action==='frames') { const result=await api('/api/violation-frames',payload);if(!same())return;if(result.run_id!==view.run_id||result.card_id!==id||result.fingerprint!==view.fingerprint)throw Error('Frame evidence does not match this review. Reload evidence.');article.querySelector('[data-slot="frames"]').innerHTML=renderFrames(result.frames,state.config?.evidence_origin);feedback.textContent='Evidence frames loaded. Captions show actual sampled times.'; }
       else if(action==='prepare') {
@@ -271,7 +303,7 @@
         article.querySelector('[data-slot="disposition"]').textContent=disposition(updated.review);if(action==='reset')article.querySelector('[data-slot="note"]').value='';feedback.textContent=editedWhileSaving?'Disposition saved with the earlier note. Your newer note is still unsaved; choose Accept or Reject again to save it.':'Human disposition saved. Recorded machine evidence is unchanged.';
       }
     } catch(error){if(same())feedback.textContent=action==='prepare'?'Could not prepare image evidence: '+error.message+' Retry preparation, or explicitly choose structured facts only.':error.message;}
-    finally{state.pendingCards--;actions();if(same())buttons.forEach((b,index)=>b.disabled=disabled[index]);}
+    finally{busyCards.delete(article);state.pendingCards--;actions();if(same()){buttons.forEach((b,index)=>b.disabled=disabled[index]);syncPreparedButton(article);}}
   }
   async function exportReview() {
     const view=state.review,generation=state.generation;if(!view||state.reviewBusy)return;state.reviewBusy=true;actions();
@@ -297,6 +329,7 @@
   async function init() {
     $('clip').addEventListener('change',()=>{$('selected-file').textContent=$('clip').files?.[0]?.name||'No clip selected.';$('rights').checked=false;actions();});
     $('rights').addEventListener('change',actions);$('upload').addEventListener('click',uploadClip);$('cancel-upload').addEventListener('click',()=>state.upload?.abort());$('start').addEventListener('click',startRun);$('cancel-run').addEventListener('click',cancelRun);$('recheck').addEventListener('click',loadConfig);
+    $('demo-run').addEventListener('click',runDemo);
     $('refresh-run').addEventListener('click',()=>{if(state.run){clearTimeout(state.timer);pollRun(state.run.id,state.generation);}});
     $('refresh-review').addEventListener('click',()=>{if(state.run)loadReview(state.run.id);});$('rule-filter').addEventListener('change',drawCards);$('cards').addEventListener('click',cardAction);$('cards').addEventListener('input',event=>{if(event.target.matches('[data-slot="note"]'))state.drafts.set(event.target.closest('[data-card-id]').dataset.cardId,event.target.value);});$('export-review').addEventListener('click',exportReview);
     $('connect-chatgpt').addEventListener('click',()=>{$('auth-confirmation').hidden=false;$('approve-auth').focus();});$('dismiss-auth').addEventListener('click',()=>{$('auth-confirmation').hidden=true;$('connect-chatgpt').focus();});

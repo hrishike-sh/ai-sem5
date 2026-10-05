@@ -4,13 +4,14 @@ const lens = require('../web/violation_lens.js');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function browserHarness(respond, savedID = null) {
+function browserHarness(respond, savedID = null, extras = {}) {
   const elements = new Map(), requests = [], navigation = [];
   function element(id) {
     if (!elements.has(id)) elements.set(id, {id,hidden:false,disabled:false,checked:false,files:[],value:id==='rule-filter'?'all':'',textContent:'',innerHTML:'',listeners:{},classList:{toggle(){}},addEventListener(type, fn){this.listeners[type]=fn;},setAttribute(name,value){this[name]=value;},removeAttribute(name){delete this[name];},replaceChildren(){this.innerHTML='';},focus(){}});
     return elements.get(id);
   }
   const window = {document:{getElementById:element,querySelector(){return {content:'test-csrf-token'};},querySelectorAll(){return [];}},localStorage:{getItem(){return savedID;},setItem(){}},location:{assign(url){navigation.push(url);}},fetch:async(path,options={})=>{requests.push({path,options});return {ok:true,json:async()=>respond(path,options)};},setTimeout(){return 1;}};
+  Object.assign(window,extras);
   const context=vm.createContext({window,URL,setTimeout,clearTimeout,module:{exports:{}}});
   vm.runInContext(fs.readFileSync(require.resolve('../web/violation_lens.js'),'utf8'),context);
   return {element,requests,navigation,settle:()=>new Promise(resolve=>setImmediate(resolve))};
@@ -325,6 +326,30 @@ test('preparing evidence never sends it, and image consent stays disabled until 
   assert.match(slots['[data-slot="feedback"]'].textContent,/Load and inspect all prepared image previews/);
 });
 
+test('unavailable source warnings preserve historical findings and clear when another source is available', async () => {
+  for(const reason of ['Original source is missing.','Original source metadata has changed.']){
+    const harness=browserHarness(path=>{
+      if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+      if(path==='/api/run-library')return {runs:[]};
+      if(path==='/api/violation-llm')return {available:false};
+      if(path.startsWith('/api/run?id=')){const id=path.split('=')[1];return {id,source:id+'.mp4',status:{state:'complete'}};}
+      if(path.startsWith('/api/violation-review?id=')){const id=path.split('=')[1];return {run_id:id,fingerprint:'fp-'+id,source_readiness:{available:id==='valid',reason,revision_kind:'metadata'},cards:[{id:'historical',rule:'wrong_way',status:'supported',reason:'Recorded evidence',facts:[],missing_facts:[],review:{decision:'accept',note:'Saved decision'}}]};}
+    },'old');
+    await harness.settle();
+    assert.equal(harness.element('source-readiness').hidden,false);
+    assert.match(harness.element('source-readiness').textContent,/Historical saved assessments and review decisions remain available/);
+    assert.match(harness.element('source-readiness').textContent,/Current original frames cannot be verified/);
+    assert.ok(harness.element('source-readiness').textContent.endsWith(reason));
+    assert.match(harness.element('cards').innerHTML,/Recorded evidence/);
+    assert.match(harness.element('cards').innerHTML,/Saved decision/);
+    assert.match(harness.element('review-summary').textContent,/1 reviewed/);
+    await harness.element('saved-runs').listeners.click({target:{closest(){return {disabled:false,dataset:{openRun:'valid'}};}}});
+    await harness.settle();
+    assert.equal(harness.element('source-readiness').hidden,true);
+    assert.equal(harness.element('source-readiness').textContent,'');
+  }
+});
+
 test('empty real review shows zero supported candidates and the exact source/run identity', async () => {
   const harness=browserHarness(path=>{
     if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
@@ -379,4 +404,149 @@ test('facts-only button sends explicit facts-only consent without preparing or t
   assert.equal(posts.length,1);assert.equal(posts[0].path,'/api/violation-explain');
   assert.deepEqual(JSON.parse(posts[0].options.body),{id:'saved',card_id:'one',fingerprint:'fp',mode:'facts_only',consent:true});
   assert.match(slots['[data-slot="explanation"]'].innerHTML,/No images were sent/);
+});
+
+test('older status responses and later active snapshots cannot regress a completed run', async () => {
+  const pending=[];let reads=0;
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};
+    if(path==='/api/violation-llm')return {available:false};
+    if(path==='/api/run?id=run'){if(++reads===1)return {id:'run',source:'clip.mp4',status:{state:'running',progress:.1}};return new Promise(resolve=>pending.push(resolve));}
+    if(path==='/api/violation-review?id=run')return {run_id:'run',fingerprint:'fp',cards:[]};
+  },'run');
+  await harness.settle();harness.element('refresh-run').listeners.click();harness.element('refresh-run').listeners.click();await harness.settle();
+  pending[1]({id:'run',source:'clip.mp4',status:{state:'complete',progress:1}});await harness.settle();
+  pending[0]({id:'run',source:'clip.mp4',status:{state:'running',progress:.2}});await harness.settle();
+  assert.equal(harness.element('run-state').textContent,'Complete');assert.equal(harness.element('progress-label').textContent,'100%');assert.equal(harness.element('cancel-run').hidden,true);
+  harness.element('refresh-run').listeners.click();await harness.settle();pending[2]({id:'run',source:'clip.mp4',status:{state:'running',progress:.3}});await harness.settle();
+  assert.equal(harness.element('run-state').textContent,'Complete');assert.equal(harness.element('progress-label').textContent,'100%');
+});
+
+test('an older evidence read cannot overwrite a newly saved human decision', async () => {
+  let reads=0,resolveOld;const view=decision=>({run_id:'run',fingerprint:'fp',cards:[{id:'card',rule:'wrong_way',review:{decision,note:''}}]});
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+    if(path==='/api/run?id=run')return {id:'run',source:'clip.mp4',status:{state:'complete',progress:1}};
+    if(path==='/api/violation-review?id=run')return ++reads===1?view(null):new Promise(resolve=>resolveOld=resolve);
+    if(path==='/api/violation-decision')return view('accept');
+  },'run');
+  await harness.settle();harness.element('refresh-review').listeners.click();await harness.settle();
+  const slots={'[data-slot="feedback"]':{},'[data-slot="note"]':{value:''},'[data-slot="disposition"]':{}};
+  const button={disabled:false,dataset:{action:'accept'},closest(){return article;}};
+  const article={dataset:{cardId:'card'},isConnected:true,querySelector(selector){return slots[selector];},querySelectorAll(){return [button];}};
+  await harness.element('cards').listeners.click({target:{closest(){return button;}}});
+  resolveOld(view(null));await harness.settle();
+  assert.match(harness.element('review-summary').textContent,/1 reviewed/);assert.match(slots['[data-slot="disposition"]'].textContent,/accepted/);
+});
+
+test('image readiness cannot unlock a busy card or leave send stuck after the request ends', async () => {
+  const prepared={run_id:'run',card_id:'card',fingerprint:'fp',preparation_id:'prep',mode:'images_and_facts',frames:[{id:'image',available:true,url:'/image.jpg'}],facts:[],missing_facts:[]};let finishFrames;
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:true};
+    if(path==='/api/run?id=run')return {id:'run',source:'clip.mp4',status:{state:'complete',progress:1}};
+    if(path==='/api/violation-review?id=run')return {run_id:'run',fingerprint:'fp',cards:[{id:'card',facts:[{text:'fact'}]}]};
+    if(path==='/api/violation-prepare')return prepared;if(path==='/api/violation-frames')return new Promise(resolve=>finishFrames=resolve);
+  },'run');
+  await harness.settle();let shown=false;
+  const image={complete:false,naturalWidth:0,listeners:{},addEventListener(type,fn){this.listeners[type]=fn;}};
+  const slots={'[data-slot="feedback"]':{},'[data-slot="preview-status"]':{},'[data-slot="frames"]':{},'[data-slot="preparation"]':{replaceChildren(){shown=false;},set innerHTML(value){shown=true;}}};
+  const buttons={prepare:{disabled:false,dataset:{action:'prepare'},closest(){return article;}},frames:{disabled:false,dataset:{action:'frames'},closest(){return article;}},send:{disabled:true,dataset:{action:'send-prepared'},closest(){return article;}}};
+  const article={dataset:{cardId:'card'},isConnected:true,querySelector(selector){return selector==='[data-action="send-prepared"]'?buttons.send:slots[selector];},querySelectorAll(selector){return selector==='img[data-prepared-frame]'?[image]:shown?Object.values(buttons):[buttons.prepare,buttons.frames];}};
+  const click=button=>harness.element('cards').listeners.click({target:{closest(){return button;}}});
+  await click(buttons.prepare);const fetching=click(buttons.frames);await harness.settle();
+  image.complete=true;image.naturalWidth=320;image.listeners.load();assert.equal(buttons.send.disabled,true);
+  finishFrames({run_id:'run',card_id:'card',fingerprint:'fp',frames:[]});await fetching;
+  assert.equal(buttons.send.disabled,false);
+});
+
+test('synthetic demo choices explicitly create and reopen computed runs without detection or model calls', async () => {
+  for(const scenario of ['opposing','following','unknown']) {
+    const harness=browserHarness(path=>{
+      if(path==='/api/config')return {vehicle_tracking_ready:false,helmet:{ready:false},violation_readiness:{ready:false,blockers:[{message:'Models absent'}]}};
+      if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+      if(path==='/api/violation-demo')return {id:'demo-'+scenario,synthetic:true,scenario,label:'Synthetic configured-direction case'};
+      if(path==='/api/run?id=demo-'+scenario)return {id:'demo-'+scenario,source:'Synthetic '+scenario,status:{state:'complete',progress:1}};
+      if(path==='/api/violation-review?id=demo-'+scenario)return {run_id:'demo-'+scenario,fingerprint:'fp',synthetic:true,provenance_notice:'Generated rectangles; configured rule test, not legal violations.',cards:[]};
+      throw Error('Unexpected endpoint: '+path);
+    });
+    await harness.settle();assert.ok(harness.requests.every(r=>!r.options.method));assert.equal(harness.element('demo-run').disabled,false);
+    harness.element('demo-scenario').value=scenario;await harness.element('demo-run').listeners.click();await harness.settle();
+    const posts=harness.requests.filter(r=>r.options.method==='POST');assert.equal(posts.length,1);assert.equal(posts[0].path,'/api/violation-demo');assert.deepEqual(JSON.parse(posts[0].options.body),{scenario});assert.equal(posts[0].options.headers['X-Traffic-Token'],'test-csrf-token');
+    assert.match(harness.element('provenance-notice').textContent,/Generated rectangles/);assert.match(harness.element('review-summary').textContent,/SYNTHETIC TEST EVIDENCE/);assert.match(harness.element('demo-message').textContent,/Synthetic demo created/);
+  }
+});
+
+test('failed synthetic demo creation keeps the previous review and provides a retry', async () => {
+  let attempts=0;
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+    if(path==='/api/run?id=existing')return {id:'existing',source:'original.mp4',status:{state:'complete',progress:1}};
+    if(path==='/api/violation-review?id=existing')return {run_id:'existing',fingerprint:'fp',cards:[]};
+    if(path==='/api/violation-demo'){attempts++;throw Error('Local clip preparation failed.');}
+  },'existing');
+  await harness.settle();const before=harness.element('review-source').textContent;
+  harness.element('demo-scenario').value='unknown';await harness.element('demo-run').listeners.click();
+  assert.equal(harness.element('review-source').textContent,before);assert.equal(harness.element('demo-run').disabled,false);assert.match(harness.element('demo-message').textContent,/retry/);
+  await harness.element('demo-run').listeners.click();assert.equal(attempts,2);
+});
+
+test('synthetic demo cannot start during an upload, and upload cancellation releases it', async () => {
+  class Upload {constructor(){this.upload={};}open(){}setRequestHeader(){}send(){}abort(){this.onabort();this.onloadend();}}
+  const harness=browserHarness(path=>path==='/api/config'?{vehicle_tracking_ready:true,helmet:{ready:true}}:path==='/api/run-library'?{runs:[]}:{available:false},null,{XMLHttpRequest:Upload});
+  await harness.settle();harness.element('clip').files=[{name:'permitted.mp4',size:10}];harness.element('rights').checked=true;harness.element('rights').listeners.change();harness.element('upload').listeners.click();
+  assert.equal(harness.element('demo-run').disabled,true);harness.element('demo-scenario').value='opposing';await harness.element('demo-run').listeners.click();
+  assert.ok(!harness.requests.some(r=>r.path==='/api/violation-demo'));harness.element('cancel-upload').listeners.click();assert.equal(harness.element('demo-run').disabled,false);assert.match(harness.element('upload-message').textContent,/cancelled/);
+});
+
+test('synthetic demo cannot start while a run is active or review reload is pending', async () => {
+  for(const active of [true,false]) {
+    let reviews=0,finishReview;
+    const harness=browserHarness(path=>{
+      if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+      if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+      if(path==='/api/run?id=run')return {id:'run',source:'clip.mp4',status:{state:active?'running':'complete',progress:active ? 0.2 : 1}};
+      if(path==='/api/violation-review?id=run'){if(++reviews===1)return {run_id:'run',fingerprint:'fp',cards:[]};return new Promise(resolve=>finishReview=resolve);}
+    },'run');
+    await harness.settle();if(!active){harness.element('refresh-review').listeners.click();await harness.settle();}
+    assert.equal(harness.element('demo-run').disabled,true);harness.element('demo-scenario').value='opposing';await harness.element('demo-run').listeners.click();assert.ok(!harness.requests.some(r=>r.path==='/api/violation-demo'));
+    if(finishReview){finishReview({run_id:'run',fingerprint:'fp',cards:[]});await harness.settle();assert.equal(harness.element('demo-run').disabled,false);}
+  }
+});
+
+test('a late card save cannot replace a different reopened run even when card IDs match', async () => {
+  let finishSave;const view=(id,decision=null)=>({run_id:id,fingerprint:'fp-'+id,cards:[{id:'same-card',rule:'wrong_way',reason:id+' evidence',review:{decision,note:''}}]});
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+    if(path.startsWith('/api/run?id=')){const id=path.split('=')[1];return {id,source:id+'.mp4',status:{state:'complete',progress:1}};}
+    if(path.startsWith('/api/violation-review?id='))return view(path.split('=')[1]);
+    if(path==='/api/violation-decision')return new Promise(resolve=>finishSave=resolve);
+  },'first');
+  await harness.settle();
+  const slots={'[data-slot="feedback"]':{},'[data-slot="note"]':{value:''},'[data-slot="disposition"]':{}};
+  const button={disabled:false,dataset:{action:'accept'},closest(){return article;}};
+  const article={dataset:{cardId:'same-card'},isConnected:true,querySelector(selector){return slots[selector];},querySelectorAll(){return [button];}};
+  const saving=harness.element('cards').listeners.click({target:{closest(){return button;}}});await harness.settle();
+  harness.element('saved-runs').listeners.click({target:{closest(){return {disabled:false,dataset:{openRun:'second'}};}}});await harness.settle();
+  assert.match(harness.element('review-source').textContent,/second.mp4/);assert.match(harness.element('cards').innerHTML,/second evidence/);
+  finishSave(view('first','accept'));await saving;
+  assert.match(harness.element('review-source').textContent,/second.mp4/);assert.match(harness.element('review-summary').textContent,/0 reviewed/);assert.doesNotMatch(harness.element('cards').innerHTML,/first evidence/);
+});
+
+test('a delayed cancellation acknowledgement cannot replace a completed worker message', async () => {
+  let reads=0,finishCancel;
+  const harness=browserHarness(path=>{
+    if(path==='/api/config')return {vehicle_tracking_ready:true,helmet:{ready:true}};
+    if(path==='/api/run-library')return {runs:[]};if(path==='/api/violation-llm')return {available:false};
+    if(path==='/api/run?id=run')return ++reads===1?{id:'run',source:'clip.mp4',status:{state:'running',progress:.2}}:{id:'run',source:'clip.mp4',status:{state:'complete',progress:1,message:'Saved evidence ready.'}};
+    if(path==='/api/violation-review?id=run')return {run_id:'run',fingerprint:'fp',cards:[]};
+    if(path==='/api/cancel')return new Promise(resolve=>finishCancel=resolve);
+  },'run');
+  await harness.settle();const cancelling=harness.element('cancel-run').listeners.click();await harness.settle();
+  harness.element('refresh-run').listeners.click();await harness.settle();finishCancel({message:'Cancellation requested.'});await cancelling;
+  assert.equal(harness.element('run-state').textContent,'Complete');assert.equal(harness.element('run-message').textContent,'Saved evidence ready.');assert.equal(harness.element('cancel-run').hidden,true);
 });

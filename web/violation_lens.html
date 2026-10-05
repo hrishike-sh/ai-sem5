@@ -7,6 +7,7 @@
   <title>ViolationLens · Evidence review</title>
   <link rel="stylesheet" href="/violation_lens.css">
   <script src="/violation_lens.js" defer></script>
+  <script src="/direct_review.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#workspace">Skip to review workspace</a>
@@ -18,16 +19,43 @@
     <section class="intro" aria-labelledby="page-title">
       <p class="eyebrow">LOCAL TRAFFIC EVIDENCE WORKSPACE</p>
       <h1 id="page-title">A closer look.<br><span>A considered decision.</span></h1>
-      <p class="lede">Upload a permitted clip, run detection, and review the evidence behind each candidate. Start with helmet and wrong-way observations.</p>
+      <p class="lede">Preview a permitted image or a selected video frame, then ask Astra to review what is visible. Keep the observations, uncertainty, and your own decision together.</p>
       <p class="scope">Candidates require human review. They do not establish legal guilt, issue fines, or create external reports.</p>
-      <details class="first-run"><summary>First time here? A one-minute guide</summary><ol><li>Choose a short MP4, MOV or AVI clip that you have permission to analyze, then upload it.</li><li>Run detection and follow its status. A saved run can be reopened after a reload.</li><li>Read each candidate's recorded facts and missing context. Load its before, during and after frames.</li><li>Optionally preview the selected evidence for ChatGPT, then explicitly choose what to send.</li><li>Add an optional note, then accept or reject the candidate for your review record and export the JSON.</li></ol><p>Unknown or insufficient evidence is a useful result. A completed run is not a guarantee that every event was detected.</p></details>
+      <details class="first-run"><summary>First time here? A one-minute guide</summary><ol><li>Choose a permitted JPG, PNG or video and upload it. For video, select a timestamp in seconds.</li><li>Inspect the exact prepared image and its evidence ID. Uploading and previewing do not send it to ChatGPT.</li><li>Connect your ChatGPT plan, acknowledge the selected image transfer, then choose Send this image to Astra.</li><li>Read the observations, suspected issues and uncertainty. Save your own review decision and export the JSON.</li></ol><p>Astra's visual assessment can be wrong. One selected frame does not establish speed, permitted travel direction, or legal guilt. The local detector workflow is optional below.</p></details>
     </section>
+    <div id="notice" class="notice" role="alert" hidden></div>
+      <div class="subscription-panel">
+        <div><strong id="subscription-status">No LLM explanation available</strong><p id="subscription-message">Deterministic evidence remains available without a ChatGPT connection.</p><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage ChatGPT usage ↗</a></div>
+        <div class="actions"><button id="connect-chatgpt" type="button" class="secondary">Connect ChatGPT</button><button id="refresh-chatgpt" type="button" class="secondary">Recheck connection</button></div>
+        <div id="auth-confirmation" hidden><p>Authorize ViolationLens to use your ChatGPT plan for selected evidence. No paid API fallback is used.</p><p class="hint">This opens ChatGPT sign-in for a new authorization. Connecting does not send evidence. Direct review sends only the prepared image you preview and explicitly approve. The optional detector workflow also offers a separate structured-facts explanation.</p><div class="actions"><button id="approve-auth" type="button">Approve and open ChatGPT sign-in</button><button id="dismiss-auth" type="button" class="secondary">Not now</button></div><p id="auth-feedback" role="status"></p></div>
+      </div>
+    <section id="direct-panel" class="panel direct-panel" aria-labelledby="direct-title">
+      <p class="eyebrow">DIRECT IMAGE REVIEW · CHATGPT PLAN</p><h2 id="direct-title">Look at the image with Astra</h2>
+      <p>Upload and preview locally, then explicitly send the selected image to Astra. No detector setup is required.</p>
+      <label class="file-picker" for="direct-file"><strong>Choose an image or video</strong><span>JPG, PNG, MP4, MOV or AVI</span><input id="direct-file" type="file" accept=".jpg,.jpeg,.png,.mp4,.mov,.avi"></label>
+      <p id="direct-filename" class="subtle">No source selected.</p>
+      <div id="direct-time-wrap" hidden><label for="direct-time">Video timestamp (seconds)</label><input id="direct-time" type="number" min="0" step="0.1" value="0"><p class="hint">Prepare one frame at this timestamp. Inspect the actual timestamp on the preview.</p></div>
+      <label class="permission"><input id="direct-rights" type="checkbox"><span>I have permission to use and analyze this image or clip.</span></label>
+      <div class="actions"><button id="direct-prepare" type="button" disabled>Upload and preview</button><button id="direct-cancel" type="button" class="secondary" hidden>Cancel upload</button></div>
+      <p id="direct-message" role="status" aria-live="polite">Choose a source to prepare an exact preview. Nothing is sent to ChatGPT automatically.</p>
+      <progress id="direct-upload-progress" max="100" value="0" aria-label="Source upload progress" hidden></progress>
+      <div id="direct-evidence" hidden>
+        <p id="direct-source" class="review-source"></p><p id="direct-source-warning" class="notice" hidden></p><p id="direct-provenance" class="notice" hidden></p>
+        <div id="direct-preview" class="frames direct-preview"></div><p id="direct-preview-status" class="hint" role="status"></p>
+        <p class="hint">The preview is the exact prepared image. JPEG metadata is removed; identities may remain visible. Cropping or blur does not guarantee anonymity.</p>
+        <label class="permission"><input id="direct-consent" type="checkbox"><span>I have inspected this preview and agree to send this selected image and its evidence identifiers to Astra through my ChatGPT plan.</span></label>
+        <button id="direct-send" type="button" disabled>Send this image to Astra</button><p id="direct-account" class="hint">Checking ChatGPT connection.</p>
+      </div>
+      <div id="direct-result" class="explanation-result" hidden></div>
+      <div id="direct-decision" class="review-decision" hidden><h3>Your review record</h3><p id="direct-disposition" class="disposition"></p><label for="direct-note">Optional review note</label><textarea id="direct-note" maxlength="4000"></textarea><div class="actions"><button id="direct-accept" type="button" class="secondary">Accept assessment</button><button id="direct-reject" type="button" class="secondary">Reject assessment</button><button id="direct-reset" type="button" class="secondary">Reset decision</button><button id="direct-export" type="button" class="secondary">Export review JSON</button></div><p class="hint">This records your disposition separately from Astra's assessment. It does not establish a legal violation.</p></div>
+      <details class="direct-library"><summary>Reopen a saved image review</summary><button id="direct-library-refresh" type="button" class="secondary">Refresh saved image reviews</button><p id="direct-library-message" role="status"></p><div id="direct-library"></div></details>
+    </section>
+    <details id="detector-workflow" class="detector-workflow"><summary>Optional local detection and rule review</summary><p class="hint">Run the existing detector pipeline on video, or inspect synthetic geometry demos. This workflow is separate from direct Astra image review.</p>
     <ol class="steps" aria-label="Review workflow">
       <li id="step-upload" aria-current="step"><span>01</span> Upload a clip</li>
       <li id="step-detect"><span>02</span> Run detection</li>
       <li id="step-review"><span>03</span> Review evidence</li>
     </ol>
-    <div id="notice" class="notice" role="alert" hidden></div>
     <section id="setup" class="setup" aria-labelledby="setup-title" hidden>
       <h2 id="setup-title">Local model setup needed</h2>
       <p id="setup-message"></p>
@@ -43,6 +71,7 @@
         <button id="upload" type="button" disabled>Upload clip</button>
         <div id="upload-progress-wrap" hidden><progress id="upload-progress" max="100" value="0" aria-label="Upload progress"></progress><p id="upload-message" role="status"></p><button id="cancel-upload" type="button" class="secondary">Cancel upload</button></div>
         <p class="hint">Upload sends the clip to this server for analysis. A separate optional ChatGPT request sends only the facts and selected prepared images you explicitly choose.</p>
+        <details class="synthetic-demo"><summary>Try a synthetic rule demo</summary><p>Generated rectangles and preset tracks test geometry and the review flow. They do not test detector accuracy or establish legal violations. No detector or ChatGPT request is needed.</p><label for="demo-scenario">Configured-direction case</label><select id="demo-scenario"><option value="opposing">Opposing direction — positive rule case</option><option value="following">Following direction — negative rule case</option><option value="unknown">Direction not configured — unknown case</option></select><button id="demo-run" type="button" class="secondary">Open synthetic demo</button><p id="demo-message" class="hint" role="status">Creates a local three-second synthetic clip and opens its computed rule review.</p></details>
       </section>
       <section class="panel detection-panel" aria-labelledby="detection-title">
         <p class="eyebrow">02 · ANALYSIS</p><h2 id="detection-title">Follow the evidence</h2>
@@ -62,18 +91,16 @@
     <section id="review-panel" class="review-panel" aria-labelledby="review-title">
       <div class="section-heading"><div><p class="eyebrow">03 · HUMAN REVIEW</p><h2 id="review-title">Candidate evidence</h2></div><button id="export-review" class="secondary" type="button" disabled>Export review JSON</button></div>
       <p id="review-source" class="review-source" hidden></p>
+      <p id="source-readiness" class="notice" role="status" hidden></p>
       <p id="review-summary" role="status">Complete a detection run or open a saved run to inspect its evidence.</p>
       <p id="provenance-notice" class="notice" hidden></p>
-      <div class="subscription-panel">
-        <div><strong id="subscription-status">No LLM explanation available</strong><p id="subscription-message">Deterministic evidence remains available without a ChatGPT connection.</p><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage ChatGPT usage ↗</a></div>
-        <div class="actions"><button id="connect-chatgpt" type="button" class="secondary">Connect ChatGPT</button><button id="refresh-chatgpt" type="button" class="secondary">Recheck connection</button></div>
-        <div id="auth-confirmation" hidden><p>Authorize ViolationLens to use your ChatGPT plan for selected evidence. No paid API fallback is used.</p><p class="hint">This opens ChatGPT sign-in for a new authorization. Connecting does not send evidence. On each card, you can preview the exact selected images and facts before sending, or explicitly send structured facts only.</p><div class="actions"><button id="approve-auth" type="button">Approve and open ChatGPT sign-in</button><button id="dismiss-auth" type="button" class="secondary">Not now</button></div><p id="auth-feedback" role="status"></p></div>
-      </div>
+
       <div id="review-tools" class="review-tools" hidden><label for="rule-filter">Show</label><select id="rule-filter"><option value="all">All candidates</option><option value="priority">Helmet &amp; wrong-way</option><option value="unreviewed">Awaiting human review</option></select><button id="refresh-review" class="secondary" type="button">Reload evidence</button></div>
       <div id="cards" class="cards"></div>
       <div class="evidence-boundaries"><strong>Read uncertainty as part of the result.</strong><p>A missing detection does not establish no helmet. Stopped traffic does not establish a red signal. A still image cannot establish speed. Missing context remains visible.</p></div>
     </section>
     <section class="panel library" aria-labelledby="library-title"><div class="section-heading"><div><p class="eyebrow">SAVED LOCALLY</p><h2 id="library-title">Continue a review</h2></div><button id="reload-library" type="button" class="secondary">Refresh runs</button></div><p id="library-message" role="status">Loading saved runs…</p><div id="saved-runs"></div><button id="more-runs" type="button" class="secondary" hidden>Load more runs</button></section>
+    </details>
   </main>
   <footer>ViolationLens <span>Local analysis · Evidence first · Human decisions</span></footer>
 </body>

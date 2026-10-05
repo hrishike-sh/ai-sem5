@@ -1,6 +1,6 @@
 # ViolationLens · AI Sem 5
 
-Local traffic evidence review. Upload a clip you have permission to analyze, run the existing detector and tracker, and inspect candidate incidents with their supporting evidence and missing facts.
+Local traffic evidence review. Upload a permitted image or select a video frame, preview exactly what will be sent, and ask Astra to review visible traffic concerns using your ChatGPT plan. Detector-assisted clip analysis remains optional.
 
 ## Run
 
@@ -15,11 +15,19 @@ The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It
 
 ## Review workflow
 
+The main page opens **Look at the image with Astra**. Choose a JPG, PNG or video, acknowledge permission, and choose **Upload and preview**. For video, select a timestamp. Inspect the exact prepared image and evidence ID, approve sending that image to OpenAI, then choose **Send this image to Astra**. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Detector weights, tracks and configured road geometry are not prerequisites.
+
+Astra returns bounded visual observations and suspected concerns with image references and uncertainty. Apparent bare heads associated with riders, crowded or unstable rider arrangements, and potentially unsecured cargo can be flagged for human inspection. The model can misread an image. Speed, wrong-way movement, red-light crossing and parking legality cannot be established by this image-only flow. It provides no identity, legal citation, fine or determination of guilt. Review the assessment, save Accept or Reject with a note, and export the JSON. Reopening a saved assessment does not send another model request.
+
+Expand **Optional local detection and rule review** for the existing local pipeline:
+
 1. Upload a permitted MP4, MOV or AVI clip and run detection. Missing model files are shown as setup requirements.
 2. Open timestamped candidate cards, inspect recorded facts and missing context, and load before/during/after frames. Frame timestamps are actual decoded positions; unavailable frames are labeled.
 3. Accept or reject a candidate with an optional note, then export the local review JSON. Human decisions are stored separately from the original algorithm output and are invalidated if that output changes.
 
 For a short walkthrough, see the [demo guide](docs/DEMO.md). Optional ChatGPT explanations are described below; the review workflow also works without them.
+
+For a repeatable demonstration, expand **Try a synthetic rule demo** and choose opposing motion, following motion, or unknown direction. The app generates a labeled three-second rectangle animation and evaluates its known coordinates with the existing geometric rule engine. This works without detector weights or ChatGPT. It demonstrates configured-rule checks, evidence frames, saved human decisions and export; it is not learned detection or a real-traffic benchmark.
 
 The review prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Triple-riding review is deferred. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
 
