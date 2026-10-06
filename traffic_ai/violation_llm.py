@@ -209,9 +209,9 @@ def _request_payload(card, model, images=None):
                                 "strict": True, "schema": schema}}}
 
 
-def _events(response, deadline):
+def _events(response, deadline, max_stream_bytes=262144):
     buffer = b""
-    for chunk in read_chunks(response, 262144, deadline):
+    for chunk in read_chunks(response, max_stream_bytes, deadline):
         buffer += chunk
         # SSE uses LF or CRLF; an event is complete only after a blank line.
         buffer = buffer.replace(b"\r\n", b"\n")
@@ -227,12 +227,16 @@ def _events(response, deadline):
         raise ExplanationError("The model stream ended in a partial event.", "incomplete_response")
 
 
-def _completed_selection(response, deadline):
+def _completed_selection(response, deadline, *, max_stream_bytes=262144, max_selection_bytes=16384):
+    # Larger per-subject selections opt in; facts and legacy reviews retain their limits.
+    if (type(max_stream_bytes) is not int or not 0 < max_stream_bytes <= 4 * 1024 * 1024
+            or type(max_selection_bytes) is not int or not 0 < max_selection_bytes <= 512 * 1024):
+        raise ExplanationError("Invalid structured response size limit.")
     completed = None
     completion_seen = False
     done_items = {}
     done_ids = set()
-    for event in _events(response, deadline):
+    for event in _events(response, deadline, max_stream_bytes):
         kind = event.get("type")
         if not isinstance(kind, str):
             raise ExplanationError("The model stream returned an invalid event type.")
@@ -307,7 +311,7 @@ def _completed_selection(response, deadline):
         text_size = len(texts[0].encode("utf-8"))
     except UnicodeEncodeError:
         raise ExplanationError("The model returned invalid Unicode text.") from None
-    if text_size > 16384:
+    if text_size > max_selection_bytes:
         raise ExplanationError("The model returned an oversized or ambiguous explanation.")
     return strict_json(texts[0]), completed.get("model")
 

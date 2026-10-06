@@ -153,7 +153,10 @@ class DirectVisionReviewer:
     def status(self):
         return {**self.auth.status(), "model": MODEL, "mode": "direct_images"}
 
-    def review(self, images, consent=False):
+    def review(self, images, consent=False, subjects=None):
+        if subjects is not None:
+            from .identified_vision import review_identified
+            return review_identified(self, images, consent, subjects)
         if consent is not True:
             raise ExplanationError("Approve sending the selected images to Astra first.", "consent_required")
         try:
