@@ -180,3 +180,92 @@ def test_stored_result_revalidated_and_prose_canonical_on_restore(prepared):
     path.write_text(json.dumps(state))
     with pytest.raises(ValueError):
         service.view(data['review_id'])
+
+
+def test_manual_annotations_reopen_export_and_exact_preview(prepared):
+    service, source, _, view, data, files = prepared
+    before = source.read_bytes()
+    result = service.annotate(data, subjects=[{'kind':'person','bbox':[2,2,12,25]},
+                                             {'kind':'motorcycle','bbox':[1,10,30,30]}])
+    assert result['fingerprint'] != data['fingerprint']
+    request = {'review_id':result['review_id'], 'fingerprint':result['fingerprint']}
+    loaded = service.load(request)
+    assert len(loaded['images']) == len(result['frames']) == 3
+    assert loaded['subjects'] == result['annotations']['subjects']
+    assert [row['id'] for row in loaded['subjects']] == ['P1','V1']
+    for frame, image in zip(result['frames'], loaded['images']):
+        assert files.paths[frame['url']].read_bytes() == base64.b64decode(image['data_url'].split(',')[1])
+        assert frame['subject_ids']
+    assert source.read_bytes() == before
+    assert files.paths[result['original_frame']['url']] == files.paths[view['frames'][0]['url']]
+    assert module.DirectReview(service.root, files).view(result['review_id']) == result
+    export = service.export(request)
+    assert json.loads(files.paths[export['url']].read_text())['annotations'] == result['annotations']
+    with pytest.raises(ValueError, match='changed'):
+        service.load(data)
+
+
+def test_annotations_invalidate_result_and_stale_edit(prepared):
+    service, _, _, _, data, _ = prepared
+    service.save_result(data, result_for(service, data))
+    service.decide({**data, 'decision':'accept'})
+    result = service.annotate(data, subjects=[])
+    assert result['model_result'] is None and result['review']['decision'] is None
+    with pytest.raises(ValueError, match='changed'):
+        service.annotate(data, subjects=[])
+
+
+def test_annotation_crop_tampering_rejected(prepared):
+    service, _, _, _, data, files = prepared
+    result = service.annotate(data, subjects=[{'kind':'person','bbox':[2,2,12,25]}])
+    files.paths[result['frames'][1]['url']].write_bytes(b'tampered crop')
+    with pytest.raises(ValueError, match='bytes changed'):
+        service.view(result['review_id'])
+
+
+def test_delete_all_then_add_uses_monotonic_ids(prepared):
+    service, _, _, _, data, _ = prepared
+    def change(request, subjects):
+        view = service.annotate(request, subjects=subjects)
+        return view, {'review_id':view['review_id'], 'fingerprint':view['fingerprint']}
+    view, request = change(data, [{'kind':'person','bbox':[1,1,10,20]}])
+    view, request = change(request, [])
+    view, request = change(request, [{'kind':'person','bbox':[1,1,10,20]}])
+    assert view['annotations']['subjects'][0]['id'] == 'P2'
+
+
+def test_full_resolution_crops_and_bounded_stored_images(prepared):
+    service, source, _, _, _, files = prepared
+    Image.new('RGB', (1536, 1024), 'gray').save(source)
+    view = service.prepare(source, {'kind':'image'}, synthetic=True)
+    data = {'review_id':view['review_id'], 'fingerprint':view['fingerprint']}
+    view = service.annotate(data, subjects=[{'kind':'person','bbox':[100,100,150,200]}])
+    assert view['annotations']['image_width'] == 768
+    assert view['annotations']['crop_source']['width'] == 1536
+    assert view['frames'][1]['width'] == 180 and view['frames'][1]['height'] == 280
+    data = {'review_id':view['review_id'], 'fingerprint':view['fingerprint']}
+    view = service.annotate(data, subjects=[])
+    folder = service.root / 'direct-reviews' / view['review_id']
+    assert len(list(folder.glob('annotation-*.jpg'))) == 1
+
+
+def test_identified_result_roundtrip_and_annotation_edit_invalidates_it(prepared):
+    from traffic_ai.identified_vision import canonicalize_result, subjects_fingerprint
+    service, _, _, _, data, files = prepared
+    view = service.annotate(data, subjects=[{'kind':'person','bbox':[2,2,12,25]}])
+    data = {'review_id':view['review_id'], 'fingerprint':view['fingerprint']}
+    loaded = service.load(data)
+    subjects, images = loaded['subjects'], loaded['images']
+    raw = {'image_fingerprint':image_fingerprint(images), 'subjects_fingerprint':subjects_fingerprint(subjects),
+           'subject_results':[{'id':'P1','role':'person_unclear','associated_vehicle_id':None,'status':'unclear',
+                               'observations':[{'kind':'association_unclear','evidence_ids':subjects[0]['evidence_ids']}],
+                               'suspected_issues':[], 'uncertainties':['association_unclear','model_may_misread']}]}
+    result = {**canonicalize_result(raw, images, subjects), **data}
+    saved = service.save_result(data, result)
+    assert saved['model_result']['mode'] == 'identified_images'
+    service.decide({**data, 'decision':'accept'})
+    assert module.DirectReview(service.root, files).view(data['review_id'])['review']['decision'] == 'accept'
+    changed = service.annotate(data, subjects=[{**subjects[0], 'bbox':[1,1,13,26]}])
+    assert changed['model_result'] is None and changed['review']['decision'] is None
+    with pytest.raises(ValueError, match='changed'):
+        service.save_result(data, result)

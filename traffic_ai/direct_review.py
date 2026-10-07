@@ -1,13 +1,15 @@
-"""Local, source-bound image review storage. No detector or hosted calls."""
+"""Local, source-bound image review storage and optional local box proposals."""
 import base64
 import hashlib
 import json
 import math
+import io
 from pathlib import Path
 import re
 import threading
 from datetime import datetime, timezone
 from uuid import uuid4
+from PIL import Image
 
 from ivp.media import load_image, preview_frame, source_revision, write_json
 from .violation_images import image_descriptors, image_fingerprint, prepare_evidence_image, validate_evidence_images
@@ -159,7 +161,7 @@ class DirectReview:
             write_json(self._path(folder, 'manifest.json'), manifest)
             return self.view(review_id)
 
-    def _images(self, folder, manifest):
+    def _original_images(self, folder, manifest):
         frames = manifest.get('frames')
         if not isinstance(frames, list) or len(frames) != 1:
             raise ValueError('Prepared frame manifest is invalid.')
@@ -174,6 +176,109 @@ class DirectReview:
         validate_evidence_images(images, [image['id']])
         return images
 
+    def _images(self, folder, manifest):
+        original = self._original_images(folder, manifest)
+        annotations = manifest.get('annotations')
+        if annotations is None:
+            return original
+        from .subject_annotations import correct_subjects, render_annotations
+        try:
+            subjects = annotations['subjects']
+            if (annotations['image_width'], annotations['image_height']) != (original[0]['width'], original[0]['height']):
+                raise ValueError('Annotation dimensions changed.')
+            crop_source = annotations['crop_source']
+            if (not isinstance(crop_source, dict) or set(crop_source) != {'width', 'height', 'timestamp', 'sha256'}
+                    or any(type(crop_source[key]) is not int or crop_source[key] < 1 for key in ('width', 'height'))
+                    or crop_source['width'] * crop_source['height'] > 40_000_000
+                    or crop_source['timestamp'] != original[0]['timestamp']
+                    or crop_source['sha256'] != manifest['source']['sha256']):
+                raise ValueError('Annotation crop source binding is invalid.')
+            corrected, _ = correct_subjects(subjects, original[0]['width'], original[0]['height'], subjects,
+                                             manifest['subject_counters'])
+            raw = base64.b64decode(original[0]['data_url'].split(',', 1)[1])
+            with Image.open(io.BytesIO(raw)) as source:
+                expected_subjects, expected = render_annotations(source.convert('RGB'), corrected,
+                                                                  manifest['review_id'], original[0]['timestamp'],
+                                                                  compact_labels=annotations.get('compact_labels', False))
+            descriptors = annotations['images']
+            if (subjects != expected_subjects or not isinstance(descriptors, list) or len(descriptors) != len(expected)
+                    or descriptors[0] != image_descriptors(expected)[0]):
+                raise ValueError('Annotation evidence does not match its source boxes.')
+            images = []
+            for item, reference in zip(descriptors, expected):
+                if (item.get('id'), item.get('role'), item.get('timestamp')) != (reference['id'], reference['role'], reference['timestamp']):
+                    raise ValueError('Annotation crop identity changed.')
+                if not isinstance(item.get('sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', item['sha256']):
+                    raise ValueError('Annotation image hash is invalid.')
+                path = self._path(folder, 'annotation-' + item['sha256'] + '.jpg')
+                with path.open('rb') as stream:
+                    payload = stream.read(256 * 1024 + 1)
+                if len(payload) > 256 * 1024 or hashlib.sha256(payload).hexdigest() != item['sha256']:
+                    raise ValueError('Annotation image bytes changed.')
+                image = {**item, 'data_url': 'data:image/jpeg;base64,' + base64.b64encode(payload).decode('ascii')}
+                validate_evidence_images([image], [reference['id']])
+                images.append(image)
+            return images
+        except (KeyError, TypeError) as exc:
+            raise ValueError('Saved annotations are invalid.') from exc
+
+    def annotate(self, data, subjects=None):
+        """Produce local proposals or apply explicit corrections to the original saved JPEG."""
+        from .subject_annotations import correct_subjects, detect_subjects, render_annotations, NOTICE as BOX_NOTICE
+        with self.lock:
+            folder, manifest, _ = self._bound(data)
+            self._check_source(manifest)
+            self._images(folder, manifest)
+            original = self._original_images(folder, manifest)[0]
+            raw = base64.b64decode(original['data_url'].split(',', 1)[1])
+            with Image.open(io.BytesIO(raw)) as source:
+                image = source.convert('RGB')
+            prior = manifest.get('annotations', {})
+            if subjects is None:
+                if prior:
+                    raise ValueError('Detector proposals already exist; edit the boxes or prepare a new review.')
+                rows, detector = detect_subjects(image)
+            else:
+                rows, detector = subjects, prior.get('detector', {'name': None, 'local_only': True})
+            corrected, counters = correct_subjects(rows, image.width, image.height,
+                                                    prior.get('subjects', []), manifest.get('subject_counters'),
+                                                    detected=subjects is None)
+            source_path = self._check_source(manifest)
+            if manifest['source']['kind'] == 'image':
+                full_rgb = load_image(source_path)
+            else:
+                # Use the decoder's selected timestamp and freshly probed source metadata.
+                from ivp.media import probe_video
+                full_rgb, actual = preview_frame(source_path, probe_video(source_path), original['timestamp'])
+                if abs(actual - original['timestamp']) > .001:
+                    raise ValueError('Source decoder no longer returns the selected frame.')
+            full_image = Image.fromarray(full_rgb) if not isinstance(full_rgb, Image.Image) else full_rgb
+            source_check = prepare_evidence_image(full_image.convert('RGB'), frame_id=original['id'], timestamp=original['timestamp'])
+            if source_check['sha256'] != original['sha256']:
+                raise ValueError('Decoded original frame no longer matches the prepared image.')
+            bound, images = render_annotations(image, corrected, manifest['review_id'], original['timestamp'], full_image.convert('RGB'), compact_labels=True)
+            manifest['annotations'] = {'subjects': bound, 'image_width': image.width, 'image_height': image.height,
+                                       'compact_labels': True,
+                                       'detector': detector, 'notice': BOX_NOTICE, 'images': image_descriptors(images),
+                                       'crop_source': {'width': full_image.width, 'height': full_image.height,
+                                                       'timestamp': original['timestamp'], 'sha256': manifest['source']['sha256']}}
+            manifest['subject_counters'] = counters
+            # A revision changes even for an identical correction, invalidating in-flight requests.
+            manifest['annotation_revision'] = manifest.get('annotation_revision', 0) + 1
+            self._check_source(manifest)
+            for item in images:
+                self._path(folder, 'annotation-' + item['sha256'] + '.jpg').write_bytes(
+                    base64.b64decode(item['data_url'].split(',', 1)[1]))
+            write_json(self._path(folder, 'manifest.json'), manifest)
+            fingerprint = hashlib.sha256(_encoded(manifest)).hexdigest()
+            write_json(self._path(folder, 'state.json'), {'fingerprint': fingerprint, 'model_result': None,
+                                                         'review': {'decision': None, 'note': ''}})
+            retained = {'annotation-' + item['sha256'] + '.jpg' for item in images}
+            for path in folder.glob('annotation-*.jpg'):
+                if path.name not in retained and path.resolve().parent == folder:
+                    path.unlink()
+            return self.view(manifest['review_id'])
+
     def view(self, review_id):
         with self.lock:
             folder, manifest, fingerprint = self._manifest(review_id)
@@ -186,12 +291,18 @@ class DirectReview:
             state = self._state(folder, fingerprint)
             model_result = (self._normalise_result(state['model_result'], manifest, fingerprint, images)
                             if state.get('model_result') is not None else None)
+            annotations = manifest.get('annotations')
+            original = manifest['frames'][0]
             return {'review_id': review_id, 'fingerprint': fingerprint,
                     'source': {key: manifest['source'][key] for key in ('name', 'kind')},
                     'frames': [{**{k: v for k, v in image.items() if k != 'data_url'}, 'position': 'selected',
-                                'available': True, 'url': self.files.url(self._path(folder, 'frame-0.jpg'))} for image in images],
+                                'subject_ids': [row['id'] for row in annotations['subjects'] if image['id'] in row['evidence_ids']] if annotations else [],
+                                'available': True, 'url': self.files.url(self._path(folder, 'annotation-' + image['sha256'] + '.jpg' if annotations else 'frame-0.jpg'))} for image in images],
+                    'original_frame': {**original, 'url': self.files.url(self._path(folder, 'frame-0.jpg'))},
+                    'annotations': annotations,
                     'synthetic': manifest.get('synthetic'), 'model_result': model_result,
-                    'review': state['review'], 'source_readiness': readiness, 'notice': NOTICE}
+                    'review': state['review'], 'source_readiness': readiness,
+                    'notice': annotations['notice'] if annotations else NOTICE}
 
     def load(self, data):
         with self.lock:
@@ -199,10 +310,19 @@ class DirectReview:
             self._check_source(manifest)
             images = self._images(folder, manifest)
             self._check_source(manifest)
-            return {**self.view(manifest['review_id']), 'images': images}
+            return {**self.view(manifest['review_id']), 'images': images,
+                    'subjects': manifest.get('annotations', {}).get('subjects', [])}
 
     @staticmethod
     def _normalise_result(result, manifest, fingerprint, images):
+        if manifest.get('annotations') is not None:
+            from .identified_vision import canonicalize_result
+            if not isinstance(result, dict) or result.get('review_id') != manifest['review_id'] or result.get('fingerprint') != fingerprint:
+                raise ValueError('Model result does not match this exact annotated review.')
+            _encoded(result)
+            canonical = canonicalize_result({key: value for key, value in result.items() if key not in ('review_id', 'fingerprint')},
+                                            images, manifest['annotations']['subjects'])
+            return {**canonical, 'review_id': manifest['review_id'], 'fingerprint': fingerprint}
         from .direct_vision import MODEL, PROVIDER, LIMITATIONS, OBSERVATIONS, ISSUES, UNCERTAINTIES, validate_direct_selection
         if (not isinstance(result, dict) or result.get('review_id') != manifest['review_id']
                 or result.get('fingerprint') != fingerprint or result.get('state') != 'reviewed'
