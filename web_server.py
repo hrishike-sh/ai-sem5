@@ -441,11 +441,18 @@ class Lab:
         if route == '/api/direct-prepare':
             source, info = self._source(data)
             return self.direct_reviews.prepare(source, info, timestamp=data.get('timestamp', 0))
+        if route == '/api/direct-annotate':
+            if 'subjects' in data and not isinstance(data['subjects'], list):
+                raise ValueError('Corrected subjects must be a list of numbered boxes.')
+            return self.direct_reviews.annotate(data, subjects=data.get('subjects'))
         if route == '/api/direct-analyze':
             if data.get('consent') is not True:
                 raise ValueError('Preview the exact image and approve sending it to Astra first.')
             prepared = self.direct_reviews.load(data)
-            result = self.direct_vision.review(prepared['images'], consent=True)
+            subjects = prepared.get('subjects')
+            if not subjects:
+                raise ValueError('Detect or correct the numbered subject boxes and preview them before sending to Astra.')
+            result = self.direct_vision.review(prepared['images'], consent=True, subjects=subjects)
             self.direct_reviews.load(data)
             return self.direct_reviews.save_result(data, {**result, 'review_id': data['review_id'],
                                                           'fingerprint': data['fingerprint']})

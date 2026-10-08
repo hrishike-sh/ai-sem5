@@ -1,6 +1,6 @@
 # ViolationLens · AI Sem 5
 
-Local traffic evidence review. Upload a permitted image or select a video frame, preview exactly what will be sent, and ask Astra to review visible traffic concerns using your ChatGPT plan. Detector-assisted clip analysis remains optional.
+Local traffic evidence review. Upload a permitted image or select a video frame, number people and vehicles locally, preview their boxes and crops, and ask Astra for findings tied to each subject ID using your ChatGPT plan. Full-clip rule analysis remains optional.
 
 ## Run
 
@@ -15,9 +15,13 @@ The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It
 
 ## Review workflow
 
-The main page opens **Look at the image with Astra**. Choose a JPG, PNG or video, acknowledge permission, and choose **Upload and preview**. For video, select a timestamp. Inspect the exact prepared image and evidence ID, approve sending that image to OpenAI, then choose **Send this image to Astra**. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Detector weights, tracks and configured road geometry are not prerequisites.
+Choose a JPG, PNG or video, acknowledge permission, and choose **Upload and preview**. For video, select a timestamp. Choose **Detect and number subjects** to use the existing pinned local YOLO model. Inspect the numbered boxes: P IDs represent people and V IDs represent vehicles, not verified riders or identities. Correct missing or wrong boxes by drawing, editing coordinates/type, or deleting them. Manual boxes also work when the detector is unavailable. At most twelve subjects are prepared; a truncated detection is visibly reported.
 
-Astra returns bounded visual observations and suspected concerns with image references and uncertainty. Apparent bare heads associated with riders, crowded or unstable rider arrangements, and potentially unsecured cargo can be flagged for human inspection. The model can misread an image. Speed, wrong-way movement, red-light crossing and parking legality cannot be established by this image-only flow. It provides no identity, legal citation, fine or determination of guilt. Review the assessment, save Accept or Reject with a note, and export the JSON. Reopening a saved assessment does not send another model request.
+Inspect the exact annotated context and ID-linked crops, approve sending them to OpenAI, then choose **Send numbered subjects to Astra**. One context and up to twelve padded crops are sent; each JPEG is bounded to 768 pixels per edge. Crops use the bound original-resolution frame. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Source paths and reviewer notes are excluded. These are within-image IDs, not identities or cross-frame tracking.
+
+Astra must return every submitted ID once, distinguish riders from pedestrians, and link each apparent rider to a submitted two-wheeler. Each finding cites that subject's own crop and shared context. Possible missing helmet requires a visible uncovered head on an apparent motorcycle rider; an obscured or ambiguous head is unclear. Possible triple riding requires three distinct visible people associated with the same motorcycle, with consistent group references. Zebra occupancy is only an observation. Speed, wrong-way movement, red-light crossing, obstruction and parking legality cannot be established by this single-frame flow. There are no legal citations, fines or determinations of guilt.
+
+Review the separate per-ID observations, suspected issues and uncertainty, then save Accept or Reject with a note and export JSON. A status of no visible violation means no supported visible concern was selected, not verified compliance. **Edit boxes** lets you correct a saved assessment; saving changes clears its model result and reviewer decision and requires a fresh preview and consent. Reopening unchanged saved results sends no new model request. Older unnumbered assessments remain readable, but new requests require subject boxes.
 
 Expand **Optional local detection and rule review** for the existing local pipeline:
 
@@ -29,7 +33,7 @@ For a short walkthrough, see the [demo guide](docs/DEMO.md). Optional ChatGPT ex
 
 For a repeatable demonstration, expand **Try a synthetic rule demo** and choose opposing motion, following motion, or unknown direction. The app generates a labeled three-second rectangle animation and evaluates its known coordinates with the existing geometric rule engine. This works without detector weights or ChatGPT. It demonstrates configured-rule checks, evidence frames, saved human decisions and export; it is not learned detection or a real-traffic benchmark.
 
-The review prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Triple-riding review is deferred. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
+The optional deterministic pipeline prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Its automatic triple-riding rule remains deferred; the numbered Astra review offers a separate fallible visual assessment. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
 
 The advanced detection and overview interface remains available at `/studio`. Saved results and uploads stay in this repository's local runtime directories.
 

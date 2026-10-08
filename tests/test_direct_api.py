@@ -7,7 +7,7 @@ from PIL import Image
 import pytest
 
 from traffic_ai.violation_images import image_fingerprint
-from tests.test_direct_vision import service
+from traffic_ai.identified_vision import canonicalize_result, subjects_fingerprint
 from tests.test_web_server import server, request
 
 
@@ -15,13 +15,15 @@ class SyntheticAstra:
     def __init__(self):
         self.calls = 0
 
-    def review(self, images, consent=False):
+    def review(self, images, consent=False, subjects=None):
         self.calls += 1
         value = {'image_fingerprint': image_fingerprint(images),
-                 'observations': [{'kind': 'head_protection_unclear', 'evidence_ids': [images[0]['id']],
-                                   'uncertainties': ['model_may_misread']}], 'suspected_issues': []}
-        reviewer, _, _ = service(images, value)
-        return reviewer.review(images, consent)
+                 'subjects_fingerprint': subjects_fingerprint(subjects),
+                 'subject_results': [{'id': s['id'], 'role': 'person_unclear',
+                     'associated_vehicle_id': None, 'status': 'unclear',
+                     'observations': [{'kind': 'association_unclear', 'evidence_ids': s['evidence_ids']}],
+                     'suspected_issues': [], 'uncertainties': ['model_may_misread']} for s in subjects]}
+        return canonicalize_result(value, images, subjects)
 
 
 @pytest.fixture
@@ -30,6 +32,8 @@ def direct(server):
     Image.new('RGB', (64, 48), 'gray').save(pixels, 'PNG')
     source = request(server, '/api/upload?name=synthetic-direct.png', raw=pixels.getvalue())
     preview = request(server, '/api/direct-prepare', {'media': source['id'], 'source_revision': source['source_revision']})
+    preview = request(server, '/api/direct-annotate', {**bound(preview),
+                      'subjects': [{'kind': 'person', 'bbox': [10, 5, 35, 40]}]})
     model = SyntheticAstra()
     server.lab.direct_vision = model
     return source, preview, model
@@ -39,12 +43,13 @@ def bound(preview):
     return {key: preview[key] for key in ('review_id', 'fingerprint')}
 
 
-def test_direct_flow_needs_no_detector_and_reopens_decision_and_export(server, direct):
+def test_manually_numbered_flow_reopens_annotations_decision_and_export(server, direct):
     _, preview, model = direct
     assert preview['frames'][0]['available'] and preview['model_result'] is None and model.calls == 0
     result = request(server, '/api/direct-analyze', {**bound(preview), 'consent': True})
     assert model.calls == 1 and result['model_result']['model'] == 'gpt-6-astra'
-    assert result['model_result']['suspected_issues'] == []
+    assert result['model_result']['subject_results'][0]['suspected_issues'] == []
+    assert result['model_result']['subject_results'][0]['id'] == preview['annotations']['subjects'][0]['id']
     decided = request(server, '/api/direct-decision', {**bound(preview), 'decision': 'reject', 'note': 'Synthetic API fixture.'})
     assert decided['review']['decision'] == 'reject'
     reopened = request(server, '/api/direct-review?id=' + preview['review_id'])
@@ -53,6 +58,7 @@ def test_direct_flow_needs_no_detector_and_reopens_decision_and_export(server, d
     path = server.lab.direct_reviews.root / 'direct-reviews' / preview['review_id'] / exported['filename']
     payload = json.loads(path.read_text())
     assert payload['external_reporting'] is False and payload['model_result']['model'] == 'gpt-6-astra'
+    assert payload['annotations']['subjects'] == preview['annotations']['subjects']
     assert 'data:image' not in path.read_text() and 'synthetic-oauth' not in path.read_text()
     assert any(item['review_id'] == preview['review_id'] for item in request(server, '/api/direct-library'))
 
@@ -84,3 +90,41 @@ def test_direct_mutation_requires_csrf_and_ignores_client_supplied_images(server
                      'images': [{'data_url': 'https://untrusted.invalid/image'}], 'model': 'gpt-6-sol'})
     assert result['model_result']['evidence'][0]['sha256'] == preview['frames'][0]['sha256']
     assert result['model_result']['model'] == 'gpt-6-astra' and model.calls == 1
+
+
+def test_new_analysis_requires_numbered_subjects(server):
+    pixels = io.BytesIO()
+    Image.new('RGB', (64, 48), 'gray').save(pixels, 'PNG')
+    source = request(server, '/api/upload?name=synthetic-no-boxes.png', raw=pixels.getvalue())
+    view = request(server, '/api/direct-prepare', {'media': source['id'], 'source_revision': source['source_revision']})
+    model = SyntheticAstra()
+    server.lab.direct_vision = model
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        request(server, '/api/direct-analyze', {**bound(view), 'consent': True})
+    assert denied.value.code == 400 and model.calls == 0
+
+
+def test_annotation_changes_invalidate_old_send_and_saved_decision(server, direct):
+    _, view, model = direct
+    request(server, '/api/direct-analyze', {**bound(view), 'consent': True})
+    request(server, '/api/direct-decision', {**bound(view), 'decision': 'accept'})
+    subject = view['annotations']['subjects'][0]
+    corrected = request(server, '/api/direct-annotate', {**bound(view), 'subjects': [
+        {'id': subject['id'], 'kind': 'person', 'bbox': [11, 5, 36, 40]}]})
+    assert corrected['annotations']['subjects'][0]['id'] == subject['id']
+    assert corrected['fingerprint'] != view['fingerprint']
+    assert corrected['model_result'] is None and corrected['review']['decision'] is None
+    with pytest.raises(urllib.error.HTTPError):
+        request(server, '/api/direct-analyze', {**bound(view), 'consent': True})
+    assert model.calls == 1
+
+
+def test_annotation_route_requires_csrf_and_rejects_invalid_subjects(server, direct):
+    _, view, model = direct
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        request(server, '/api/direct-annotate', {**bound(view), 'subjects': []}, token=False)
+    assert denied.value.code == 403
+    for subjects in (None, {}, [{'id': 'P999', 'kind': 'person', 'bbox': [1, 1, 5, 5]}]):
+        with pytest.raises(urllib.error.HTTPError):
+            request(server, '/api/direct-annotate', {**bound(view), 'subjects': subjects})
+    assert model.calls == 0

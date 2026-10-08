@@ -6,13 +6,13 @@ const direct=require('../web/direct_review.js');
 const common=require('../web/violation_lens.js');
 const frame={id:'image-1',timestamp:0,url:'/prepared/image.jpg',available:true,sha256:'abc',width:640,height:480};
 const assessment={state:'reviewed',model:'gpt-6-astra',observations:[{kind:'rider_visible',text:'A rider is visible.',evidence_ids:['image-1'],uncertainties:['visibility'],uncertainty_text:['The head is partially obscured.']}],suspected_issues:[],limitations:['A single image cannot establish speed.']};
-const view=(overrides={})=>({review_id:'review-1',fingerprint:'fingerprint-1',source:{name:'permitted.png',kind:'image'},frames:[{...frame}],model_result:null,review:{decision:null,note:''},source_readiness:{available:true},...overrides});
+const view=(overrides={})=>({review_id:'review-1',fingerprint:'fingerprint-1',source:{name:'permitted.png',kind:'image'},frames:[{...frame}],model_result:null,review:{decision:null,note:''},source_readiness:{available:true},annotations:{image_width:640,image_height:480,subjects:[{id:'P1',kind:'person',bbox:[10,20,100,200],origin:'detector',evidence_ids:['image-1']}]},...overrides});
 
 function harness(respond=()=>undefined,saved=null){
   const elements=new Map(),requests=[],uploads=[],downloads=[],savedIDs=[];
   function node(id){
     const item={id,hidden:false,disabled:false,checked:false,value:id==='direct-time'?'0':'',files:[],textContent:'',listeners:{},dataset:{},images:[],label:{hidden:false},classList:{toggle(){}},addEventListener(name,fn){this.listeners[name]=fn;},closest(){return this.label;},querySelectorAll(selector){return selector.startsWith('img')?this.images:[];},click(){downloads.push(this.href);},remove(){}};
-    Object.defineProperty(item,'innerHTML',{get(){return this.html||'';},set(html){this.html=html;this.images=Array.from(html.matchAll(/data-direct-frame="([^"]+)"/g),match=>({...node('image'),dataset:{directFrame:match[1]},naturalWidth:0,complete:false}));}});
+    Object.defineProperty(item,'innerHTML',{configurable:true,get(){return this.html||'';},set(html){this.html=html;this.images=Array.from(html.matchAll(/data-direct-frame="([^"]+)"/g),match=>({...node('image'),dataset:{directFrame:match[1]},naturalWidth:0,complete:false}));}});
     return item;
   }
   function element(id){if(!elements.has(id))elements.set(id,node(id));return elements.get(id);}
@@ -88,4 +88,85 @@ test('direct decisions preserve model assessment and use bound identities, expor
 });
 test('direct analysis errors remain actionable and never invoke an alternate route or model',async()=>{
   const h=harness(path=>path==='/api/direct-analyze'?{error:'Astra is unavailable.'}:undefined,'review-1');await h.settle();h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();await h.click('direct-send');assert.match(h.element('direct-message').textContent,/Astra is unavailable/);assert.match(h.element('direct-message').textContent,/No alternate model or paid API fallback/);assert.equal(h.element('direct-evidence').hidden,false);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,1);
+});
+
+
+test('unannotated and empty subject previews cannot be sent',()=>{
+  for(const annotations of [null,{subjects:[]}])assert.equal(direct.canSend(view({annotations}),new Set(['image-1']),true,true,false),false);
+});
+test('corrections reset consent and require rebuilt exact previews',async()=>{
+  const h=harness(path=>path==='/api/direct-annotate'?view({fingerprint:'corrected',frames:[{...frame,id:'context'},{...frame,id:'P1-crop'}]}):undefined,'review-1');await h.settle();h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();
+  await h.click('direct-add-box');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-send').disabled,true);h.element('direct-consent').checked=true;await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  await h.click('direct-save-boxes');const req=h.requests.find(r=>r.path==='/api/direct-annotate'),data=JSON.parse(req.options.body);assert.equal(data.subjects[0].id,'P1');assert.equal(data.subjects[1].id,undefined);assert.equal(data.subjects[1].origin,'manual');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-send').disabled,true);
+  h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+});
+test('per-ID assessments preserve unclear versus no visible violation and escape canonical text',()=>{
+  const result={model:'Astra',subject_results:[{id:'P1',status:'unclear',role:'unclear',observations:[{text:'<script>unsafe()</script>',evidence_ids:['image-1']}],suspected_issues:[]},{id:'V1',status:'no_visible_violation',role:'vehicle',observations:[],suspected_issues:[]}],limitations:['<b>One frame</b>']};
+  const html=direct.renderResult(result,[frame]);assert.match(html,/P1/);assert.match(html,/V1/);assert.match(html,/Unclear — evidence is insufficient/);assert.match(html,/No visible violation for this subject/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>|<b>One frame/);
+});
+test('detector failure preserves local manual editing without a model call',async()=>{
+  const h=harness(path=>path==='/api/direct-annotate'?{error:'Local detector unavailable.'}:path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/Local detector unavailable/);assert.match(h.element('direct-message').textContent,/manually/);assert.equal(h.element('direct-add-box').disabled,false);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+});
+test('late image events from previous annotations cannot unlock sending',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();const old=h.element('direct-preview').images[0];await h.click('direct-annotate');h.element('direct-consent').checked=true;old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+});
+
+
+test('cross-category corrections request a new ID while same-family edits keep their identity',async()=>{
+  const h=harness(undefined,'review-1');await h.settle();h.element('direct-boxes').listeners.change({target:{dataset:{boxIndex:'0',boxField:'kind'},value:'motorcycle'}});await h.click('direct-save-boxes');const data=JSON.parse(h.requests.find(r=>r.path==='/api/direct-annotate').options.body);assert.equal(data.subjects[0].id,undefined);assert.equal(data.subjects[0].kind,'motorcycle');assert.equal(data.subjects[0].origin,'manual');
+});
+test('annotation responses for another review cannot replace current evidence',async()=>{
+  const h=harness(path=>path==='/api/direct-annotate'?view({review_id:'wrong-review',fingerprint:'wrong',frames:[{...frame,id:'wrong-frame'}]}):path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/another review/);assert.doesNotMatch(h.element('direct-preview').innerHTML,/wrong-frame/);assert.match(h.element('direct-source').textContent,/review-1/);assert.equal(h.element('direct-consent').checked,false);
+});
+test('per-subject issue cards show canonical uncertainty and associated IDs',()=>{
+  const html=direct.renderResult({subject_results:[{id:'P1',role:'rider',associated_vehicle_id:'V1',status:'suspected_issue',observations:[],suspected_issues:[{text:'Possible helmet concern.',evidence_ids:['image-1'],related_subject_ids:['P1','V1']}],uncertainty_text:['Head partly obscured.']}],limitations:[]},[frame],view().annotations);
+  assert.match(html,/Person P1/);assert.match(html,/Suspected issue — human review required/);assert.match(html,/Associated vehicle: V1/);assert.match(html,/Related subjects: P1, V1/);assert.match(html,/Head partly obscured/);
+});
+
+
+test('existing annotations disable redetection but keep correction controls available',async()=>{
+  const h=harness(undefined,'review-1');await h.settle();assert.equal(h.element('direct-annotate').disabled,true);assert.equal(h.element('direct-add-box').disabled,false);await h.click('direct-annotate');assert.equal(h.requests.some(r=>r.path==='/api/direct-annotate'),false);await h.click('direct-add-box');assert.equal(h.element('direct-save-boxes').disabled,false);
+});
+test('truncated proposals disclose confidence selection and allow replacement within twelve boxes',async()=>{
+  const subjects=Array.from({length:12},(_,i)=>({id:'P'+(i+1),kind:'person',bbox:[i,0,i+10,50],origin:'detector',evidence_ids:['image-1']}));
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:{subjects,image_width:640,image_height:480,detector:{truncated:true}}}):undefined,'review-1');await h.settle();assert.match(h.element('direct-annotation-notice').textContent,/12 highest-confidence proposals/);assert.match(h.element('direct-annotation-notice').textContent,/delete or replace boxes/);assert.equal(h.element('direct-add-box').disabled,true);await h.click('direct-add-box');assert.equal(h.element('direct-save-boxes').disabled,true);
+  h.element('direct-boxes').listeners.click({target:{closest:()=>({dataset:{boxDelete:'0'}})}});assert.equal(h.element('direct-add-box').disabled,false);await h.click('direct-add-box');assert.equal(h.element('direct-add-box').disabled,true);
+});
+
+
+test('saved assessments can edit boxes and saving clears old decisions with fresh preview consent',async()=>{
+  let saved=view({model_result:assessment,review:{decision:'accept',note:'Original note'}});
+  const h=harness((path,options)=>path.startsWith('/api/direct-review')?saved:path==='/api/direct-annotate'?(saved=view({fingerprint:'revision-2',frames:[{...frame,id:'new-context'},{...frame,id:'new-crop'}]})):undefined,'review-1');await h.settle();
+  assert.equal(h.element('direct-edit-boxes').hidden,false);assert.equal(h.element('direct-annotation-editor').hidden,true);await h.click('direct-edit-boxes');assert.equal(h.element('direct-annotation-editor').hidden,false);assert.match(h.element('direct-message').textContent,/Saving changes clears/);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);
+  h.element('direct-consent').checked=true;await h.click('direct-add-box');assert.equal(h.element('direct-consent').checked,false);for(const id of ['direct-accept','direct-reject','direct-reset','direct-export'])assert.equal(h.element(id).disabled,true);await h.click('direct-accept');await h.click('direct-export');assert.equal(h.requests.some(r=>r.path==='/api/direct-decision'||r.path==='/api/direct-export'),false);
+  const old=h.element('direct-preview').images[0];await h.click('direct-save-boxes');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');assert.equal(h.element('direct-consent').checked,false);h.element('direct-consent').checked=true;old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+  const reopened=harness(path=>path.startsWith('/api/direct-review')?saved:undefined,'review-1');await reopened.settle();assert.equal(reopened.element('direct-result').hidden,true);assert.equal(reopened.element('direct-consent').checked,false);assert.equal(reopened.element('direct-send').disabled,true);
+});
+test('discarding saved-result box edits preserves assessment and decision without a write',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment,review:{decision:'reject',note:'Keep'}}):undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');await h.click('direct-add-box');await h.click('direct-cancel-box-edit');assert.equal(h.element('direct-annotation-editor').hidden,true);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);assert.match(h.element('direct-disposition').textContent,/rejected/);assert.equal(h.element('direct-note').value,'Keep');assert.equal(h.element('direct-accept').disabled,false);assert.equal(h.requests.some(r=>r.options.method==='POST'),false);
+});
+test('failed saved-result corrections retain old result and block stale disposition until discard',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment}):path==='/api/direct-annotate'?{error:'Invalid box.'}:undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');await h.click('direct-add-box');await h.click('direct-save-boxes');assert.match(h.element('direct-message').textContent,/Invalid box/);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);assert.equal(h.element('direct-accept').disabled,true);assert.equal(h.element('direct-save-boxes').disabled,false);
+});
+
+
+test('numbered evidence uses compact labels while exact IDs remain in titles and data',()=>{
+  const contextID='direct-0123456789abcdef0123456789abcdef-context',cropID='direct-0123456789abcdef0123456789abcdef-crop-P3';
+  const frames=[{...frame,id:contextID,role:'context',subject_ids:['P3']},{...frame,id:cropID,role:'subject_crop',subject_ids:['P3']}];
+  const result={subject_results:[{id:'P3',role:'person_unclear',status:'unclear',observations:[{text:'Subject unclear.',evidence_ids:[contextID,cropID]}],suspected_issues:[]}],limitations:[]};
+  const before=JSON.stringify({frames,result}),preview=direct.renderPreview(view({frames})),html=direct.renderResult(result,frames);
+  for(const markup of [preview,html]){assert.match(markup,/>Context</);assert.match(markup,/>P3 crop</);assert.ok(markup.includes('title="'+contextID+'"'));assert.ok(markup.includes('title="'+cropID+'"'));assert.doesNotMatch(markup.replace(/<[^>]*>/g,''),/direct-012345/);}
+  assert.equal(JSON.stringify({frames,result}),before);assert.ok(preview.includes('data-direct-frame="'+cropID+'"'));
+});
+test('crop labels use bound annotations when subject metadata is absent and escape ID titles',()=>{
+  const crop={...frame,id:'crop-"<unsafe>',role:'subject_crop'};const annotations={subjects:[{id:'P3',evidence_ids:['context',crop.id]}]};
+  const html=direct.renderPreview(view({frames:[crop],annotations}));assert.match(html,/>P3 crop</);assert.match(html,/title="crop-&quot;&lt;unsafe&gt;"/);assert.doesNotMatch(html,/<unsafe>/);
+});
+
+
+test('typing a coordinate invalidates saved-result actions immediately without replacing the input table',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment}):undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');h.element('direct-consent').checked=true;
+  const table=h.element('direct-boxes'),before=table.innerHTML;let replacements=0;Object.defineProperty(table,'innerHTML',{get:()=>before,set:()=>{replacements++;},configurable:true});
+  const input={dataset:{boxIndex:'0',boxField:'0'},value:'17'};table.listeners.input({target:input});assert.equal(replacements,0);assert.equal(input.value,'17');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-save-boxes').disabled,false);for(const action of ['accept','reject','reset','export'])assert.equal(h.element('direct-'+action).disabled,true);assert.match(h.element('direct-preview-status').textContent,/Boxes changed/);
+  await h.click('direct-export');assert.equal(h.requests.some(r=>r.path==='/api/direct-export'),false);await h.click('direct-save-boxes');const sent=JSON.parse(h.requests.find(r=>r.path==='/api/direct-annotate').options.body);assert.equal(sent.subjects[0].bbox[0],17);
 });
