@@ -5,7 +5,7 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_KEYS = {'road_users', 'helmet', 'turn_sign'}
+MODEL_KEYS = {'road_users', 'helmet', 'turn_sign', 'vehicle_types'}
 
 
 def _absolute_path(value, field):
@@ -60,7 +60,7 @@ def runtime_config():
     if 'models' in config:
         models = config['models']
         if not isinstance(models, dict) or set(models) - MODEL_KEYS:
-            raise ValueError('ai-runtime.json models supports road_users, helmet and turn_sign paths only.')
+            raise ValueError('ai-runtime.json models supports road_users, helmet, turn_sign and vehicle_types paths only.')
         for key, value in models.items():
             model = _absolute_path(value, 'models.' + key)
             if model.exists() and not model.is_file():
