@@ -445,6 +445,10 @@ class Lab:
             if 'subjects' in data and not isinstance(data['subjects'], list):
                 raise ValueError('Corrected subjects must be a list of numbered boxes.')
             return self.direct_reviews.annotate(data, subjects=data.get('subjects'))
+        if route == '/api/direct-local-models':
+            return self.direct_reviews.run_models(data)
+        if route == '/api/direct-vehicle-types':
+            return self.direct_reviews.run_vehicle_types(data)
         if route == '/api/direct-analyze':
             if data.get('consent') is not True:
                 raise ValueError('Preview the exact image and approve sending it to Astra first.')
@@ -452,7 +456,12 @@ class Lab:
             subjects = prepared.get('subjects')
             if not subjects:
                 raise ValueError('Detect or correct the numbered subject boxes and preview them before sending to Astra.')
-            result = self.direct_vision.review(prepared['images'], consent=True, subjects=subjects)
+            local_evidence = prepared.get('local_evidence')
+            if not local_evidence or local_evidence.get('state') not in ('complete', 'unavailable'):
+                raise ValueError('Run the local specialist models before sending this review to Astra.')
+            result = self.direct_vision.review(prepared['images'], consent=True, subjects=subjects,
+                                              local_evidence=local_evidence,
+                                              vehicle_type_evidence=prepared.get('vehicle_type_evidence'))
             self.direct_reviews.load(data)
             return self.direct_reviews.save_result(data, {**result, 'review_id': data['review_id'],
                                                           'fingerprint': data['fingerprint']})
@@ -780,6 +789,7 @@ def create_server(port=8521):
                 return self.respond({"error": "Cross-origin request rejected."}, 403)
             if not lab.lock.acquire(blocking=False):
                 return self.respond({"error": "Another operation is running. Try again shortly."}, 409)
+            response_status = 200
             try:
                 self.connection.settimeout(120)
                 parsed = urlparse(self.path)
@@ -837,15 +847,17 @@ def create_server(port=8521):
                         self.wfile.write(payload)
                         return
                     result = lab.post(parsed.path, data)
-                self.respond(result)
             except (ValueError, TypeError, OSError, RuntimeError) as exc:
-                self.respond({"error": str(exc)}, 400)
+                result, response_status = {"error": str(exc)}, 400
             except Exception:
                 import traceback
                 traceback.print_exc()
-                self.respond({"error": "Processing failed. See temp/server.log for details."}, 500)
+                result, response_status = {"error": "Processing failed. See temp/server.log for details."}, 500
             finally:
                 lab.lock.release()
+            # A completed response may immediately trigger the next pipeline stage.
+            # Release the mutation lock before making that completion observable.
+            self.respond(result, response_status)
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     lab.violation_auth = SubscriptionAuth(callback_uri=f'http://127.0.0.1:{server.server_port}/auth/callback')

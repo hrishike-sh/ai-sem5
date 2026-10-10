@@ -269,3 +269,110 @@ def test_identified_result_roundtrip_and_annotation_edit_invalidates_it(prepared
     assert changed['model_result'] is None and changed['review']['decision'] is None
     with pytest.raises(ValueError, match='changed'):
         service.save_result(data, result)
+
+
+def test_local_evidence_bound_run_reopen_export_and_correction(prepared, monkeypatch):
+    from traffic_ai import subject_models
+    service, source, _, _, data, files = prepared
+    calls=[]
+    def predict(rgb):
+        calls.append(rgb.copy())
+        return [{'label':'no_helmet','model_score':.73,'box':[4.,3.,9.,8.]}]
+    monkeypatch.setattr(subject_models,'predict_heads',predict)
+    view=service.annotate(data,subjects=[{'kind':'person','bbox':[2,2,12,25]}, {'kind':'motorcycle','bbox':[1,15,30,30]}])
+    request={'review_id':view['review_id'],'fingerprint':view['fingerprint']}
+    before=source.read_bytes()
+    modeled=service.run_models(request)
+    assert modeled['fingerprint']!=request['fingerprint']
+    assert modeled['local_evidence']==modeled['annotations']['local_evidence']
+    assert modeled['local_evidence']['subjects'][0]['helmet']['status']=='no_helmet'
+    assert len(calls)==1 and calls[0].shape==(32,48,3)
+    assert source.read_bytes()==before
+    fresh={'review_id':modeled['review_id'],'fingerprint':modeled['fingerprint']}
+    assert module.DirectReview(service.root,files).view(fresh['review_id'])==modeled
+    assert service.load(fresh)['local_evidence']==modeled['local_evidence']
+    report=service.export(fresh)
+    assert json.loads(files.paths[report['url']].read_text())['local_evidence']==modeled['local_evidence']
+    assert len(calls)==1
+    with pytest.raises(ValueError,match='changed'):service.run_models(request)
+    changed=service.annotate(fresh,subjects=modeled['annotations']['subjects'])
+    assert changed['local_evidence'] is None
+    assert changed['model_result'] is None and changed['review']['decision'] is None
+
+
+def test_local_run_rejects_missing_annotations_changed_source_and_decode(prepared,monkeypatch):
+    from traffic_ai import subject_models
+    service,source,_,_,data,_=prepared
+    calls=[]
+    monkeypatch.setattr(subject_models,'predict_heads',lambda rgb:calls.append(1) or [])
+    with pytest.raises(ValueError,match='numbered'):service.run_models(data)
+    view=service.annotate(data,subjects=[{'kind':'person','bbox':[2,2,12,25]}])
+    data={'review_id':view['review_id'],'fingerprint':view['fingerprint']}
+    original_load=module.load_image
+    monkeypatch.setattr(module,'load_image',lambda path:np.zeros((32,48,3),np.uint8))
+    with pytest.raises(ValueError,match='Decoded original'):service.run_models(data)
+    monkeypatch.setattr(module,'load_image',original_load)
+    stat=source.stat()
+    raw=bytearray(source.read_bytes());raw[-1]^=1;source.write_bytes(raw)
+    os.utime(source,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+    with pytest.raises(ValueError,match='source changed'):service.run_models(data)
+    assert not calls
+
+
+def test_local_run_detects_source_mutation_during_inference(prepared,monkeypatch):
+    from traffic_ai import subject_models
+    service,source,_,_,data,_=prepared
+    view=service.annotate(data,subjects=[{'kind':'person','bbox':[2,2,12,25]}])
+    data={'review_id':view['review_id'],'fingerprint':view['fingerprint']}
+    def predict(rgb):
+        source.write_bytes(b'changed during inference')
+        return []
+    monkeypatch.setattr(subject_models,'predict_heads',predict)
+    with pytest.raises(ValueError,match='source changed'):service.run_models(data)
+    assert service.view(data['review_id'])['local_evidence'] is None
+
+
+def test_local_evidence_fingerprint_bound_model_result_and_rerun_reset(prepared,monkeypatch):
+    from traffic_ai import subject_models
+    from traffic_ai.identified_vision import canonicalize_result, subjects_fingerprint, local_evidence_fingerprint
+    service,_,_,_,data,files=prepared
+    monkeypatch.setattr(subject_models,'predict_heads',lambda rgb:[])
+    view=service.annotate(data,subjects=[{'kind':'person','bbox':[2,2,12,25]}])
+    view=service.run_models({'review_id':view['review_id'],'fingerprint':view['fingerprint']})
+    data={'review_id':view['review_id'],'fingerprint':view['fingerprint']}
+    loaded=service.load(data)
+    raw={'image_fingerprint':image_fingerprint(loaded['images']),
+         'subjects_fingerprint':subjects_fingerprint(loaded['subjects']),
+         'local_evidence_fingerprint':local_evidence_fingerprint(loaded['local_evidence']),
+         'subject_results':[{'id':'P1','role':'person_unclear','associated_vehicle_id':None,'status':'unclear',
+                             'observations':[{'kind':'association_unclear','evidence_ids':loaded['subjects'][0]['evidence_ids']}],'suspected_issues':[],
+                             'uncertainties':['association_unclear','model_may_misread']}]}
+    result={**canonicalize_result(raw,loaded['images'],loaded['subjects'],loaded['local_evidence']),**data}
+    service.save_result(data,result)
+    service.decide({**data,'decision':'accept'})
+    assert module.DirectReview(service.root,files).view(data['review_id'])['review']['decision']=='accept'
+    rerun=service.run_models(data)
+    assert rerun['fingerprint']!=data['fingerprint']
+    assert rerun['review']['decision'] is None and rerun['model_result'] is None
+
+
+def test_vehicle_specialist_survives_failed_subject_detector(prepared, monkeypatch):
+    service, _, _, _, data, _ = prepared
+    def failed_detector(image):
+        raise RuntimeError('Private weight path must not appear')
+    monkeypatch.setattr('traffic_ai.subject_annotations.detect_subjects', failed_detector)
+    monkeypatch.setattr('traffic_ai.vehicle_types.predict_types', lambda rgb: [
+        {'class_id': 7, 'label': 'Two-wheeler', 'model_score': .82, 'box': [1., 1., 20., 20.]}])
+    view = service.annotate(data)
+    assert view['annotations']['detector']['state'] == 'unavailable'
+    assert 'Private' not in str(view)
+    request = {key: view[key] for key in ('review_id', 'fingerprint')}
+    result = service.run_vehicle_types(request)
+    assert result['vehicle_type_evidence']['state'] == 'complete'
+    assert result['vehicle_type_evidence']['candidate_counts']['total'] == 1
+    assert result['local_evidence'] is None
+    fresh = {key: result[key] for key in ('review_id', 'fingerprint')}
+    exported = service.export(fresh)
+    payload = json.loads((service.root/'direct-reviews'/view['review_id']/exported['filename']).read_text())
+    assert payload['feature_report']['features']['vehicle_types']['state'] == 'complete'
+    assert service.view(view['review_id'])['vehicle_type_evidence'] == result['vehicle_type_evidence']

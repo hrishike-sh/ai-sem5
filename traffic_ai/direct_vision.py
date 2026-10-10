@@ -153,10 +153,12 @@ class DirectVisionReviewer:
     def status(self):
         return {**self.auth.status(), "model": MODEL, "mode": "direct_images"}
 
-    def review(self, images, consent=False, subjects=None):
+    def review(self, images, consent=False, subjects=None, local_evidence=None, vehicle_type_evidence=None):
         if subjects is not None:
             from .identified_vision import review_identified
-            return review_identified(self, images, consent, subjects)
+            return review_identified(self, images, consent, subjects, local_evidence, vehicle_type_evidence)
+        if local_evidence is not None or vehicle_type_evidence is not None:
+            raise ExplanationError("Local model evidence requires labeled subjects and their crops.", "invalid_identified_review")
         if consent is not True:
             raise ExplanationError("Approve sending the selected images to Astra first.", "consent_required")
         try:

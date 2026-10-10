@@ -237,7 +237,11 @@ class DirectReview:
             if subjects is None:
                 if prior:
                     raise ValueError('Detector proposals already exist; edit the boxes or prepare a new review.')
-                rows, detector = detect_subjects(image)
+                try:
+                    rows, detector = detect_subjects(image)
+                except (RuntimeError, OSError, ImportError):
+                    rows, detector = [], {'name': 'yolo11s', 'local_only': True, 'state': 'unavailable',
+                        'reason': 'Subject detector unavailable. Add boxes manually; other local specialists can still inspect this image.'}
             else:
                 rows, detector = subjects, prior.get('detector', {'name': None, 'local_only': True})
             corrected, counters = correct_subjects(rows, image.width, image.height,
@@ -279,6 +283,54 @@ class DirectReview:
                     path.unlink()
             return self.view(manifest['review_id'])
 
+    def run_models(self, data):
+        """Run the pinned specialist against the unchanged original selected frame."""
+        from .subject_models import build_evidence, validate_local_evidence
+        return self._run_specialist(data, 'local_evidence', build_evidence, validate_local_evidence)
+
+    def run_vehicle_types(self, data):
+        from .vehicle_types import build_evidence, validate_vehicle_evidence
+        return self._run_specialist(data, 'vehicle_type_evidence', build_evidence, validate_vehicle_evidence)
+
+    def _run_specialist(self, data, field, builder, validator):
+        with self.lock:
+            folder, manifest, _ = self._bound(data)
+            source_path = self._check_source(manifest)
+            self._images(folder, manifest)
+            annotations = manifest.get('annotations')
+            if annotations is None:
+                raise ValueError('Prepare numbered subject boxes before running local models.')
+            original = manifest['frames'][0]
+            if manifest['source']['kind'] == 'image':
+                rgb = load_image(source_path)
+            else:
+                from ivp.media import probe_video
+                rgb, actual = preview_frame(source_path, probe_video(source_path), original['timestamp'])
+                if abs(actual - original['timestamp']) > .001:
+                    raise ValueError('Source decoder no longer returns the selected frame.')
+            full_image = Image.fromarray(rgb) if not isinstance(rgb, Image.Image) else rgb
+            full_image = full_image.convert('RGB')
+            check = prepare_evidence_image(full_image, frame_id=original['id'], timestamp=original['timestamp'])
+            if (check['sha256'] != original['sha256'] or
+                    (full_image.width, full_image.height) != (annotations['crop_source']['width'], annotations['crop_source']['height'])):
+                raise ValueError('Decoded original frame no longer matches the prepared image.')
+            import numpy as np
+            evidence = builder(np.asarray(full_image), annotations['subjects'],
+                                      annotations['image_width'], annotations['image_height'],
+                                      truncated=annotations['detector'].get('truncated', False))
+            validator(evidence, annotations['subjects'])
+            self._check_source(manifest)
+            self._images(folder, manifest)
+            annotations[field] = evidence
+            manifest['local_evidence_revision'] = manifest.get('local_evidence_revision', 0) + 1
+            # Commit only after all inference and source checks succeed; invalidate downstream decisions.
+            _encoded(manifest)
+            write_json(self._path(folder, 'manifest.json'), manifest)
+            fingerprint = hashlib.sha256(_encoded(manifest)).hexdigest()
+            write_json(self._path(folder, 'state.json'), {'fingerprint': fingerprint, 'model_result': None,
+                                                         'review': {'decision': None, 'note': ''}})
+            return self.view(manifest['review_id'])
+
     def view(self, review_id):
         with self.lock:
             folder, manifest, fingerprint = self._manifest(review_id)
@@ -292,14 +344,22 @@ class DirectReview:
             model_result = (self._normalise_result(state['model_result'], manifest, fingerprint, images)
                             if state.get('model_result') is not None else None)
             annotations = manifest.get('annotations')
+            local_evidence = annotations.get('local_evidence') if annotations else None
+            vehicle_type_evidence = annotations.get('vehicle_type_evidence') if annotations else None
+            if local_evidence is not None:
+                from .subject_models import validate_local_evidence
+                validate_local_evidence(local_evidence, annotations['subjects'])
             original = manifest['frames'][0]
+            from .feature_report import build_feature_report
+            feature_report = build_feature_report(annotations)
             return {'review_id': review_id, 'fingerprint': fingerprint,
                     'source': {key: manifest['source'][key] for key in ('name', 'kind')},
                     'frames': [{**{k: v for k, v in image.items() if k != 'data_url'}, 'position': 'selected',
                                 'subject_ids': [row['id'] for row in annotations['subjects'] if image['id'] in row['evidence_ids']] if annotations else [],
                                 'available': True, 'url': self.files.url(self._path(folder, 'annotation-' + image['sha256'] + '.jpg' if annotations else 'frame-0.jpg'))} for image in images],
                     'original_frame': {**original, 'url': self.files.url(self._path(folder, 'frame-0.jpg'))},
-                    'annotations': annotations,
+                    'annotations': annotations, 'local_evidence': local_evidence,
+                    'vehicle_type_evidence': vehicle_type_evidence, 'feature_report': feature_report,
                     'synthetic': manifest.get('synthetic'), 'model_result': model_result,
                     'review': state['review'], 'source_readiness': readiness,
                     'notice': annotations['notice'] if annotations else NOTICE}
@@ -321,7 +381,8 @@ class DirectReview:
                 raise ValueError('Model result does not match this exact annotated review.')
             _encoded(result)
             canonical = canonicalize_result({key: value for key, value in result.items() if key not in ('review_id', 'fingerprint')},
-                                            images, manifest['annotations']['subjects'])
+                                            images, manifest['annotations']['subjects'], manifest['annotations'].get('local_evidence'),
+                                            manifest['annotations'].get('vehicle_type_evidence'))
             return {**canonical, 'review_id': manifest['review_id'], 'fingerprint': fingerprint}
         from .direct_vision import MODEL, PROVIDER, LIMITATIONS, OBSERVATIONS, ISSUES, UNCERTAINTIES, validate_direct_selection
         if (not isinstance(result, dict) or result.get('review_id') != manifest['review_id']

@@ -95,10 +95,71 @@ def subjects_fingerprint(subjects):
     return hashlib.sha256(json.dumps(subjects, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
-def validate_identified_selection(value, images, subjects):
+def _validated_local_evidence(local_evidence, subjects):
+    if local_evidence is None:
+        return None
+    from .subject_models import validate_local_evidence
+    try:
+        return deepcopy(validate_local_evidence(local_evidence, subjects))
+    except (ValueError, TypeError, KeyError):
+        _fail('Local model evidence is invalid or does not match the selected subjects.')
+
+
+def local_evidence_fingerprint(local_evidence):
+    return hashlib.sha256(json.dumps(local_evidence, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+def vehicle_type_evidence_fingerprint(evidence):
+    return local_evidence_fingerprint(evidence)
+
+
+def _validated_vehicle_evidence(evidence, subjects):
+    if evidence is None:
+        return None
+    from .vehicle_types import validate_vehicle_evidence
+    try:
+        return deepcopy(validate_vehicle_evidence(evidence, subjects))
+    except (ValueError, TypeError, KeyError):
+        _fail('Vehicle-type evidence is invalid or does not match the selected subjects.')
+
+
+def _vehicle_payload(evidence):
+    return {'state': evidence['state'], 'candidate_counts': deepcopy(evidence['candidate_counts']),
+            'subjects': [{'id': row['id'], 'status': row['status'],
+                          'candidates': [{key: detection[key] for key in ('class_id', 'label', 'model_score', 'evidence_id')}
+                                         for detection in row['candidates']]}
+                         for row in evidence['subjects']]}
+
+
+def _local_payload(evidence):
+    """Only bounded model facts cross the network; no paths, notes or runtime data."""
+    return {'version': evidence['version'], 'state': evidence['state'],
+            'model': {key: evidence['model'][key] for key in ('name', 'revision', 'sha256', 'classes')},
+            'score_notice': evidence['score_notice'],
+            'candidate_score_threshold': evidence['thresholds']['candidate_score'],
+            'subjects': [{'id': row['id'], 'helmet': {'status': row['helmet']['status'],
+                         'detections': deepcopy(row['helmet']['detections'])},
+                         'vehicle_candidates': deepcopy(row['vehicle_candidates'])}
+                        for row in evidence['subjects']],
+            'vehicle_counts': deepcopy(evidence['vehicle_counts'])}
+
+
+def validate_identified_selection(value, images, subjects, local_evidence=None, vehicle_type_evidence=None):
     subjects = validate_subjects(subjects, images)
-    if not isinstance(value, dict) or set(value) != {'image_fingerprint', 'subjects_fingerprint', 'subject_results'} or value['image_fingerprint'] != image_fingerprint(images) or value['subjects_fingerprint'] != subjects_fingerprint(subjects):
+    local_evidence = _validated_local_evidence(local_evidence, subjects)
+    vehicle_type_evidence = _validated_vehicle_evidence(vehicle_type_evidence, subjects)
+    keys = {'image_fingerprint', 'subjects_fingerprint', 'subject_results'}
+    if local_evidence is not None:
+        keys.add('local_evidence_fingerprint')
+    if vehicle_type_evidence is not None:
+        keys.add('vehicle_type_evidence_fingerprint')
+    if not isinstance(value, dict) or set(value) != keys or value['image_fingerprint'] != image_fingerprint(images) or value['subjects_fingerprint'] != subjects_fingerprint(subjects):
         _fail('The per-ID review does not match the selected subjects and images.')
+    if local_evidence is not None and value['local_evidence_fingerprint'] != local_evidence_fingerprint(local_evidence):
+        _fail('The per-ID review does not match its local model evidence.')
+    if vehicle_type_evidence is not None and value['vehicle_type_evidence_fingerprint'] != vehicle_type_evidence_fingerprint(vehicle_type_evidence):
+        _fail('The per-ID review does not match its vehicle-type evidence.')
+    local_by_id = {s['id']: s for s in local_evidence['subjects']} if local_evidence is not None else None
     results = value['subject_results']
     source = {s['id']: s for s in subjects}
     if not isinstance(results, list) or len(results) != len(subjects):
@@ -138,6 +199,14 @@ def validate_identified_selection(value, images, subjects):
                     if not isinstance(related, list) or any(not isinstance(v, str) or v not in source for v in related) or len(related) != len(set(related)):
                         _fail()
         observed = {r['kind'] for r in result['observations']}
+        if local_by_id is not None and s['kind'] == 'person':
+            local_head = local_by_id[s['id']]['helmet']['status']
+            # Astra can abstain, but cannot turn ambiguous/absent detections into a head claim,
+            # or replace the specialist's accepted class with its opposite.
+            required_head = {'helmet': 'helmet_visible', 'no_helmet': 'bare_head_visible'}.get(local_head)
+            for head in observed & {'bare_head_visible', 'helmet_visible'}:
+                if head != required_head:
+                    _fail('Astra head observations must be grounded in the local helmet prediction.')
         if role == 'rider' and 'rider_association_visible' not in observed:
             _fail('Rider association needs visible context and crop support.')
         if role == 'rider' and not observed & {'bare_head_visible', 'helmet_visible', 'head_protection_unclear'}:
@@ -168,6 +237,10 @@ def validate_identified_selection(value, images, subjects):
             if issue['kind'] == 'helmet_possible':
                 if role != 'rider' or source[vehicle]['kind'] != 'motorcycle' or 'bare_head_visible' not in observed or 'headwear_ambiguous' in uncertainty or issue['related_subject_ids'] != [s['id'], vehicle]:
                     _fail('Helmet suspicion needs a clearly uncovered head and confirmed motorcycle rider association.')
+                if local_by_id is not None:
+                    local = local_by_id[s['id']]
+                    if local['helmet']['status'] != 'no_helmet' or vehicle not in {v['id'] for v in local['vehicle_candidates']}:
+                        _fail('Helmet suspicion requires an accepted local no-helmet prediction and matching rider association.')
     for result in results:
         for issue in result['suspected_issues']:
             if issue['kind'] != 'triple_riding_possible':
@@ -187,17 +260,22 @@ def validate_identified_selection(value, images, subjects):
     return deepcopy(value)
 
 
-def canonicalize_result(result, images, subjects):
+def canonicalize_result(result, images, subjects, local_evidence=None, vehicle_type_evidence=None):
     """Accept raw selection or rendered result; discard render text and revalidate."""
     value = deepcopy(result)
     if isinstance(value, dict) and 'state' in value:
-        if set(value) != {'state', 'provider', 'model', 'mode', 'image_fingerprint', 'subjects_fingerprint', 'evidence', 'subject_results', 'limitations'}:
+        keys = {'state', 'provider', 'model', 'mode', 'image_fingerprint', 'subjects_fingerprint', 'evidence', 'subject_results', 'limitations'}
+        if local_evidence is not None:
+            keys.add('local_evidence_fingerprint')
+        if vehicle_type_evidence is not None:
+            keys.add('vehicle_type_evidence_fingerprint')
+        if set(value) != keys:
             _fail()
         if (value['state'] != 'reviewed' or value['provider'] != PROVIDER or value['model'] != MODEL
                 or value['mode'] != 'identified_images' or value['evidence'] != image_descriptors(images)
                 or value['limitations'] != list(LIMITATIONS)):
             _fail('Rendered review provenance does not match its evidence and model.')
-        value = {k: value[k] for k in ('image_fingerprint', 'subjects_fingerprint', 'subject_results')}
+        value = {k: value[k] for k in ('image_fingerprint', 'subjects_fingerprint', 'subject_results', 'local_evidence_fingerprint', 'vehicle_type_evidence_fingerprint') if k in value}
         if not isinstance(value['subject_results'], list):
             _fail()
         for row in value['subject_results']:
@@ -211,7 +289,7 @@ def canonicalize_result(result, images, subjects):
                     if not isinstance(item, dict):
                         _fail()
                     item.pop('text', None)
-    selected = validate_identified_selection(value, images, subjects)
+    selected = validate_identified_selection(value, images, subjects, local_evidence, vehicle_type_evidence)
     for row in selected['subject_results']:
         row['uncertainty_text'] = [UNCERTAINTIES[u] for u in row['uncertainties']]
         for field, labels in (('observations', OBSERVATIONS), ('suspected_issues', ISSUES)):
@@ -230,7 +308,15 @@ Wrong-way, red-light crossing and speed rules: NEVER establish them from these f
 Always include model_may_misread. Suspected issues may be empty. Use suspected_issue only with supported issues; otherwise unclear for ambiguous association/head/subject or person_unclear; otherwise no_visible_violation (which means only no supported visible concern, never compliance). Never combine no_visible_concern with uncertainty observations or suspected issues. Do not guess hidden details. Schema constraints do not override the evidence requirements.'''
 
 
-def _schema(images, subjects):
+LOCAL_EVIDENCE_INSTRUCTIONS = '''Local specialist evidence is authoritative for model predictions and model scores. Scores are detector outputs, not calibrated accuracy or legal certainty. You explain this evidence; never invent, edit, replace, or return scores, predictions, model metadata, or free text. The local evidence fingerprint must be echoed exactly.
+For each person, helmet_visible is permitted only when the specialist helmet status is helmet; bare_head_visible only when it is no_helmet. You may abstain with head_protection_unclear if the view is inadequate. All other specialist states (including unclear, low_confidence, not_observed and unavailable) prohibit helmet_visible, bare_head_visible and helmet_possible. Missing detection is never proof of missing helmet.
+helmet_possible additionally requires an accepted local no_helmet status, the same submitted vehicle in that person's vehicle_candidates, and independent visible rider association to that exact motorcycle in context and crop. Geometric candidates alone do not establish riding. Pedestrians cannot have helmet issues. Local model results remain separately displayed even when you abstain. Do not infer other observations from model metadata, model scores or candidate geometry.'''
+
+
+VEHICLE_EVIDENCE_INSTRUCTIONS = '''Vehicle-type evidence is optional context from a separate local specialist. Echo vehicle_type_evidence_fingerprint exactly. Its predictions, scores, and candidate counts are immutable backend outputs, not fields you may generate, revise, or overwrite. Scores are not calibrated accuracy. Candidate counts count current-image detector proposals, not confirmed distinct vehicles or traffic volume. Per-ID subtype candidates are geometric matches, not confirmed identities or rider associations. Missing, conflicting or low-confidence detections do not establish a subtype or absence. Never infer legal permissions, capacity, helmet requirements, travel direction, or any violation from a vehicle subtype. Do not add subtype observations or new output fields; use only the existing evidence-supported selection schema.'''
+
+
+def _schema(images, subjects, local_evidence=None, vehicle_type_evidence=None):
     def enum(values):
         return {'type': 'string', 'enum': list(values)}
     def array(item, minimum, maximum):
@@ -242,28 +328,47 @@ def _schema(images, subjects):
         if issue:
             props['related_subject_ids'] = array(enum(s['id'] for s in subjects), 2, 12)
         return obj(props)
-    return obj({'image_fingerprint': enum([image_fingerprint(images)]), 'subjects_fingerprint': enum([subjects_fingerprint(subjects)]),
+    schema = obj({'image_fingerprint': enum([image_fingerprint(images)]), 'subjects_fingerprint': enum([subjects_fingerprint(subjects)]),
         'subject_results': array(obj({'id': enum(s['id'] for s in subjects), 'role': enum(['rider', 'pedestrian', 'person_unclear', 'vehicle']),
         'associated_vehicle_id': {'anyOf': [enum(s['id'] for s in subjects), {'type': 'null'}]},
         'status': enum(['suspected_issue', 'no_visible_violation', 'unclear']),
         'observations': array(finding(OBSERVATIONS), 1, 10), 'suspected_issues': array(finding(ISSUES, True), 0, 2),
         'uncertainties': array(enum(UNCERTAINTIES), 1, len(UNCERTAINTIES))}), len(subjects), len(subjects))})
+    if local_evidence is not None:
+        schema['properties']['local_evidence_fingerprint'] = enum([local_evidence_fingerprint(local_evidence)])
+        schema['required'].append('local_evidence_fingerprint')
+    if vehicle_type_evidence is not None:
+        schema['properties']['vehicle_type_evidence_fingerprint'] = enum([vehicle_type_evidence_fingerprint(vehicle_type_evidence)])
+        schema['required'].append('vehicle_type_evidence_fingerprint')
+    return schema
 
 
-def _payload(images, subjects):
-    content = [{'type': 'input_text', 'text': json.dumps({'image_fingerprint': image_fingerprint(images), 'subjects_fingerprint': subjects_fingerprint(subjects), 'subjects': subjects}, allow_nan=False)}]
+def _payload(images, subjects, local_evidence=None, vehicle_type_evidence=None):
+    local_evidence = _validated_local_evidence(local_evidence, subjects)
+    vehicle_type_evidence = _validated_vehicle_evidence(vehicle_type_evidence, subjects)
+    metadata = {'image_fingerprint': image_fingerprint(images), 'subjects_fingerprint': subjects_fingerprint(subjects), 'subjects': subjects}
+    if local_evidence is not None:
+        metadata.update(local_evidence=_local_payload(local_evidence), local_evidence_fingerprint=local_evidence_fingerprint(local_evidence))
+    if vehicle_type_evidence is not None:
+        metadata.update(vehicle_type_evidence=_vehicle_payload(vehicle_type_evidence),
+                        vehicle_type_evidence_fingerprint=vehicle_type_evidence_fingerprint(vehicle_type_evidence))
+    content = [{'type': 'input_text', 'text': json.dumps(metadata, allow_nan=False)}]
     for i in images:
         content.extend([{'type': 'input_text', 'text': 'Evidence ID: ' + json.dumps(i['id'])}, {'type': 'input_image', 'image_url': i['data_url'], 'detail': 'high'}])
-    return {'model': MODEL, 'store': False, 'stream': True, 'tools': [], 'tool_choice': 'none', 'instructions': INSTRUCTIONS,
-        'input': [{'role': 'user', 'content': content}], 'text': {'format': {'type': 'json_schema', 'name': 'identified_image_review', 'strict': True, 'schema': _schema(images, subjects)}}}
+    instructions = INSTRUCTIONS + ('\n' + LOCAL_EVIDENCE_INSTRUCTIONS if local_evidence is not None else '')
+    instructions += '\n' + VEHICLE_EVIDENCE_INSTRUCTIONS if vehicle_type_evidence is not None else ''
+    return {'model': MODEL, 'store': False, 'stream': True, 'tools': [], 'tool_choice': 'none', 'instructions': instructions,
+        'input': [{'role': 'user', 'content': content}], 'text': {'format': {'type': 'json_schema', 'name': 'identified_image_review', 'strict': True, 'schema': _schema(images, subjects, local_evidence, vehicle_type_evidence)}}}
 
 
-def review_identified(reviewer, images, consent, subjects):
+def review_identified(reviewer, images, consent, subjects, local_evidence=None, vehicle_type_evidence=None):
     if consent is not True:
         raise ExplanationError('Approve sending the selected images to Astra first.', 'consent_required')
     try:
         prepared = prepare_identified_images(images)
         selected_subjects = validate_subjects(subjects, prepared)
+        selected_local_evidence = _validated_local_evidence(local_evidence, selected_subjects)
+        selected_vehicle_evidence = _validated_vehicle_evidence(vehicle_type_evidence, selected_subjects)
         grant = reviewer.auth.grant()
         if not isinstance(grant, SubscriptionGrant) or not grant.valid():
             raise ExplanationError('An authorized ChatGPT plan grant is required.', 'subscription_required')
@@ -275,15 +380,19 @@ def review_identified(reviewer, images, consent, subjects):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise ExplanationError('The Astra review timed out.', 'timeout')
-        with reviewer.http.open(RESOURCE + '/responses', bearer=grant.access_token, data=_payload(prepared, selected_subjects), timeout=remaining) as response:
+        with reviewer.http.open(RESOURCE + '/responses', bearer=grant.access_token, data=_payload(prepared, selected_subjects, selected_local_evidence, selected_vehicle_evidence), timeout=remaining) as response:
             selection, actual_model = _completed_selection(response, deadline,
                                                            max_stream_bytes=4 * 1024 * 1024,
                                                            max_selection_bytes=512 * 1024)
         if actual_model != MODEL:
             raise ExplanationError('The response did not confirm the requested Astra model.', 'model_unavailable')
-        result = canonicalize_result(selection, prepared, selected_subjects)
+        result = canonicalize_result(selection, prepared, selected_subjects, selected_local_evidence, selected_vehicle_evidence)
         if image_fingerprint(prepare_identified_images(images)) != image_fingerprint(prepared) or subjects_fingerprint(validate_subjects(subjects, images)) != subjects_fingerprint(selected_subjects):
             raise ExplanationError('Images or subjects changed during review.', 'stale_images')
+        if selected_local_evidence is not None and local_evidence_fingerprint(_validated_local_evidence(local_evidence, selected_subjects)) != local_evidence_fingerprint(selected_local_evidence):
+            raise ExplanationError('Local model evidence changed during review.', 'stale_local_evidence')
+        if selected_vehicle_evidence is not None and vehicle_type_evidence_fingerprint(_validated_vehicle_evidence(vehicle_type_evidence, selected_subjects)) != vehicle_type_evidence_fingerprint(selected_vehicle_evidence):
+            raise ExplanationError('Vehicle-type evidence changed during review.', 'stale_vehicle_type_evidence')
         return result
     except (AuthError, EvidenceImageError) as error:
         raise ExplanationError(str(error), error.code) from None

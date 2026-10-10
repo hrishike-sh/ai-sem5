@@ -2,6 +2,7 @@
 import io
 import json
 import urllib.error
+import threading
 
 from PIL import Image
 import pytest
@@ -15,7 +16,7 @@ class SyntheticAstra:
     def __init__(self):
         self.calls = 0
 
-    def review(self, images, consent=False, subjects=None):
+    def review(self, images, consent=False, subjects=None, local_evidence=None, vehicle_type_evidence=None):
         self.calls += 1
         value = {'image_fingerprint': image_fingerprint(images),
                  'subjects_fingerprint': subjects_fingerprint(subjects),
@@ -23,17 +24,27 @@ class SyntheticAstra:
                      'associated_vehicle_id': None, 'status': 'unclear',
                      'observations': [{'kind': 'association_unclear', 'evidence_ids': s['evidence_ids']}],
                      'suspected_issues': [], 'uncertainties': ['model_may_misread']} for s in subjects]}
-        return canonicalize_result(value, images, subjects)
+        if local_evidence is not None:
+            from traffic_ai.identified_vision import local_evidence_fingerprint
+            value['local_evidence_fingerprint'] = local_evidence_fingerprint(local_evidence)
+        if vehicle_type_evidence is not None:
+            from traffic_ai.identified_vision import vehicle_type_evidence_fingerprint
+            value['vehicle_type_evidence_fingerprint'] = vehicle_type_evidence_fingerprint(vehicle_type_evidence)
+        return canonicalize_result(value, images, subjects, local_evidence=local_evidence,
+                                   vehicle_type_evidence=vehicle_type_evidence)
 
 
 @pytest.fixture
-def direct(server):
+def direct(server, monkeypatch):
+    monkeypatch.setattr('traffic_ai.subject_models.predict_heads', lambda rgb: [])
+    monkeypatch.setattr('traffic_ai.vehicle_types.predict_types', lambda rgb: [])
     pixels = io.BytesIO()
     Image.new('RGB', (64, 48), 'gray').save(pixels, 'PNG')
     source = request(server, '/api/upload?name=synthetic-direct.png', raw=pixels.getvalue())
     preview = request(server, '/api/direct-prepare', {'media': source['id'], 'source_revision': source['source_revision']})
     preview = request(server, '/api/direct-annotate', {**bound(preview),
                       'subjects': [{'kind': 'person', 'bbox': [10, 5, 35, 40]}]})
+    preview = request(server, '/api/direct-local-models', bound(preview))
     model = SyntheticAstra()
     server.lab.direct_vision = model
     return source, preview, model
@@ -128,3 +139,63 @@ def test_annotation_route_requires_csrf_and_rejects_invalid_subjects(server, dir
         with pytest.raises(urllib.error.HTTPError):
             request(server, '/api/direct-annotate', {**bound(view), 'subjects': subjects})
     assert model.calls == 0
+
+
+def test_local_models_bind_revision_export_and_require_csrf(server, direct):
+    _, view, model = direct
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        request(server, '/api/direct-local-models', bound(view), token=False)
+    assert denied.value.code == 403
+    fresh = request(server, '/api/direct-local-models', bound(view))
+    assert fresh['fingerprint'] != view['fingerprint']
+    assert fresh['local_evidence']['state'] == 'complete'
+    assert fresh['local_evidence']['subjects'][0]['helmet']['status'] == 'not_observed'
+    assert model.calls == 0
+    exported = request(server, '/api/direct-export', bound(fresh))
+    path = server.lab.direct_reviews.root / 'direct-reviews' / fresh['review_id'] / exported['filename']
+    assert json.loads(path.read_text())['local_evidence'] == fresh['local_evidence']
+    with pytest.raises(urllib.error.HTTPError):
+        request(server, '/api/direct-analyze', {**bound(view), 'consent': True})
+    assert model.calls == 0
+
+
+def test_saved_corrections_require_new_local_evidence(server, direct):
+    _, view, model = direct
+    changed = request(server, '/api/direct-annotate', {**bound(view), 'subjects': [
+        {'id': 'P1', 'kind': 'person', 'bbox': [11, 5, 35, 40]}]})
+    assert changed['local_evidence'] is None
+    with pytest.raises(urllib.error.HTTPError):
+        request(server, '/api/direct-analyze', {**bound(changed), 'consent': True})
+    assert model.calls == 0
+
+
+def test_vehicle_type_endpoint_independently_saves_report(server, direct):
+    _, view, model = direct
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        request(server, '/api/direct-vehicle-types', bound(view), token=False)
+    assert denied.value.code == 403
+    fresh = request(server, '/api/direct-vehicle-types', bound(view))
+    assert fresh['vehicle_type_evidence']['state'] == 'complete'
+    assert fresh['local_evidence'] == view['local_evidence']
+    assert fresh['feature_report']['features']['vehicle_types']['state'] == 'complete'
+    assert fresh['fingerprint'] != view['fingerprint'] and model.calls == 0
+
+
+def test_completed_post_releases_lock_before_client_can_start_next_stage(server, monkeypatch):
+    original = server.RequestHandlerClass.respond
+    observed = []
+    def response(handler, value, *args, **kwargs):
+        if value == {'pipeline_stage': 'completed'}:
+            def next_request():
+                acquired = server.lab.lock.acquire(blocking=False)
+                observed.append(acquired)
+                if acquired:
+                    server.lab.lock.release()
+            thread = threading.Thread(target=next_request)
+            thread.start()
+            thread.join(timeout=2)
+        return original(handler, value, *args, **kwargs)
+    monkeypatch.setattr(server.RequestHandlerClass, 'respond', response)
+    monkeypatch.setattr(server.lab, 'post', lambda route, data: {'pipeline_stage': 'completed'})
+    assert request(server, '/api/synthetic-stage', {'fixture': True}) == {'pipeline_stage': 'completed'}
+    assert observed == [True]

@@ -84,6 +84,20 @@ def test_status_is_local_and_does_not_claim_catalog_verification(images):
     assert auth.calls == 0 and not http.calls
 
 
+def test_local_evidence_requires_identified_subjects(images):
+    reviewer, auth, http = service(images)
+    with pytest.raises(ExplanationError, match='labeled subjects'):
+        reviewer.review(images, True, local_evidence={})
+    assert auth.calls == 0 and http.calls == []
+
+
+def test_vehicle_evidence_requires_identified_subjects(images):
+    reviewer, auth, http = service(images)
+    with pytest.raises(ExplanationError, match='labeled subjects'):
+        reviewer.review(images, True, vehicle_type_evidence={})
+    assert auth.calls == 0 and http.calls == []
+
+
 @pytest.mark.parametrize("consent", [False, None, 1, "true", []])
 def test_literal_image_consent_required_before_any_grant_or_network(images, consent):
     reviewer, auth, http = service(images)
