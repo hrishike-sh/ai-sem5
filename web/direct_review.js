@@ -46,33 +46,108 @@
       if(!refs.length||refs.some(id=>!ids.has(id)))return '<li>Assessment item unavailable: its evidence references do not match this review.</li>';
       const uncertainty=list(item.uncertainty_text).length?item.uncertainty_text:list(item.uncertainties);
       const label=Object.prototype.hasOwnProperty.call(kindLabels,item.kind)?kindLabels[item.kind]:'Visual assessment';
-      return `<li><strong>${esc(label)}</strong><p>${esc(item.text)}</p><small>Evidence: ${refs.map(esc).join(', ')}</small>${uncertainty.length?`<p class="missing">Uncertainty: ${uncertainty.map(esc).join(' · ')}</p>`:''}</li>`;
+      return `<li><strong>${esc(label)}</strong><p>${esc(item.text)}</p><small>Evidence: ${refs.map(esc).join(', ')}</small>${uncertainty.length?`<p class="missing">Uncertainty: ${uncertainty.map(esc).join(' - ')}</p>`:''}</li>`;
     }).join('');
-    return `<h3>Astra image assessment</h3><p class="hint">Saved model output · ${esc(result.model||'Model not reported')}</p><p>These are fallible visual interpretations of the selected image. They do not establish legal guilt, speed, or permitted travel direction.</p><h4>Visible observations</h4>${list(result.observations).length?`<ul>${entries(result.observations)}</ul>`:'<p>No structured observations were returned.</p>'}<h4>Suspected issues requiring review</h4>${list(result.suspected_issues).length?`<ul>${entries(result.suspected_issues)}</ul>`:'<p>No suspected issues were returned. This does not establish that the scene is free of violations.</p>'}<h4>Limitations</h4><ul>${list(result.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+    return `<h3>Optional Astra interpretation</h3><p>Interpretation is separate from the primary local specialist evidence above.</p><p class="hint">Saved model output - ${esc(result.model||'Model not reported')}</p><p>These are fallible visual interpretations of the selected image. They do not establish legal guilt, speed, or permitted travel direction.</p><h4>Visible observations</h4>${list(result.observations).length?`<ul>${entries(result.observations)}</ul>`:'<p>No structured observations were returned.</p>'}<h4>Suspected issues requiring review</h4>${list(result.suspected_issues).length?`<ul>${entries(result.suspected_issues)}</ul>`:'<p>No suspected issues were returned. This does not establish that the scene is free of violations.</p>'}<h4>Limitations</h4><ul>${list(result.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
   }
   function subjectName(subject){return `${subject.kind.charAt(0).toUpperCase()+subject.kind.slice(1)} ${subject.id||'(new)'}`;}
   function renderSubjects(result,frames,annotations){
     const ids=new Set(list(frames).map(f=>f.id));
-    const statuses={unclear:'Unclear — evidence is insufficient',no_visible_violation:'No visible violation for this subject',suspected_issue:'Suspected issue — human review required'};
-    const entries=items=>list(items).map(item=>{const refs=list(item.evidence_ids);return !refs.length||refs.some(id=>!ids.has(id))?'<li>Assessment item unavailable: evidence does not match this review.</li>':`<li>${esc(item.text)}<small>Evidence: ${refs.map(id=>evidenceReference(id,frames,annotations)).join(', ')}${list(item.related_subject_ids).length?' · Related subjects: '+item.related_subject_ids.map(esc).join(', '):''}</small>${list(item.uncertainty_text).length?`<p class="missing">${item.uncertainty_text.map(esc).join(' · ')}</p>`:''}</li>`;}).join('');
-    return `<h3>Astra assessment by subject</h3><p class="hint">${esc(result.model||'Saved model output')}. Interpretations require human review.</p>${result.subject_results.map(subject=>`<section class="subject-result"><h4>${esc(list(annotations?.subjects).find(s=>s.id===(subject.subject_id||subject.id))?subjectName(list(annotations.subjects).find(s=>s.id===(subject.subject_id||subject.id))):(subject.subject_id||subject.id))}</h4><p><strong>${esc(statuses[subject.status]||'Unclear — status unavailable')}</strong></p><p>Role: ${esc(({rider:'Rider',pedestrian:'Pedestrian',person_unclear:'Person — role unclear',vehicle:'Vehicle'})[subject.role]||'Unclear')}${subject.associated_vehicle_id?` · Associated vehicle: ${esc(subject.associated_vehicle_id)}`:''}</p><h5>Observations</h5>${list(subject.observations).length?`<ul>${entries(subject.observations)}</ul>`:'<p>No observations recorded for this subject.</p>'}<h5>Suspected violations</h5>${list(subject.suspected_issues).length?`<ul>${entries(subject.suspected_issues)}</ul>`:'<p>No suspected violations recorded for this subject. This is not proof of compliance.</p>'}${list(subject.uncertainty_text).length?`<p class="missing">Uncertainty: ${subject.uncertainty_text.map(esc).join(' · ')}</p>`:''}</section>`).join('')}<h4>Limitations</h4><ul>${list(result.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+    const statuses={unclear:'Unclear - evidence is insufficient',no_visible_violation:'No visible violation for this subject',suspected_issue:'Suspected issue - human review required'};
+    const entries=items=>list(items).map(item=>{const refs=list(item.evidence_ids);return !refs.length||refs.some(id=>!ids.has(id))?'<li>Assessment item unavailable: evidence does not match this review.</li>':`<li>${esc(item.text)}<small>Evidence: ${refs.map(id=>evidenceReference(id,frames,annotations)).join(', ')}${list(item.related_subject_ids).length?' - Related subjects: '+item.related_subject_ids.map(esc).join(', '):''}</small>${list(item.uncertainty_text).length?`<p class="missing">${item.uncertainty_text.map(esc).join(' - ')}</p>`:''}</li>`;}).join('');
+    return `<h3>Optional Astra interpretation by subject</h3><p>Interpretation is separate from the primary local specialist evidence above.</p><p class="hint">${esc(result.model||'Saved model output')}. Interpretations require human review.</p>${result.subject_results.map(subject=>`<section class="subject-result"><h4>${esc(list(annotations?.subjects).find(s=>s.id===(subject.subject_id||subject.id))?subjectName(list(annotations.subjects).find(s=>s.id===(subject.subject_id||subject.id))):(subject.subject_id||subject.id))}</h4><p><strong>${esc(statuses[subject.status]||'Unclear - status unavailable')}</strong></p><p>Role: ${esc(({rider:'Rider',pedestrian:'Pedestrian',person_unclear:'Person - role unclear',vehicle:'Vehicle'})[subject.role]||'Unclear')}${subject.associated_vehicle_id?` - Associated vehicle: ${esc(subject.associated_vehicle_id)}`:''}</p><h5>Observations</h5>${list(subject.observations).length?`<ul>${entries(subject.observations)}</ul>`:'<p>No observations recorded for this subject.</p>'}<h5>Suspected violations</h5>${list(subject.suspected_issues).length?`<ul>${entries(subject.suspected_issues)}</ul>`:'<p>No suspected violations recorded for this subject. This is not proof of compliance.</p>'}${list(subject.uncertainty_text).length?`<p class="missing">Uncertainty: ${subject.uncertainty_text.map(esc).join(' - ')}</p>`:''}</section>`).join('')}<h4>Limitations</h4><ul>${list(result.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
   }
-  function canSend(view,loaded,consent,available,busy){return !!view&&!view.model_result&&list(view.annotations?.subjects).length>0&&view.source_readiness?.available!==false&&!busy&&available===true&&consent===true&&list(view.frames).length>0&&view.frames.every(f=>f.available!==false&&f.url&&loaded.has(f.id));}
-  const helpers={sourceKind,selectedTime,validateView,renderPreview,renderResult,canSend};
+  function localEvidence(view){return view?.local_evidence||view?.annotations?.local_evidence;}
+  function localReady(view){return ['complete','unavailable'].includes(localEvidence(view)?.state);}
+  function renderLocalEvidence(view){
+    const evidence=localEvidence(view),subjects=list(view?.annotations?.subjects);
+    if(!evidence)return '<p>Run specialist models to check helmets on the current numbered subjects locally.</p>';
+    const statuses={helmet:'Helmet detected',no_helmet:'No helmet detected',unclear:'Ambiguous',low_confidence:'Low confidence',not_observed:'Not observed',not_applicable:'Not applicable',unavailable:'Unavailable'};
+    const cards=subjects.filter(s=>s.kind==='person').map(subject=>{
+      const item=list(evidence.subjects).find(s=>s.id===subject.id),helmet=item?.helmet;
+      const detections=list(helmet?.detections).filter(d=>['helmet','no_helmet'].includes(d.label)&&Number.isFinite(d.model_score)&&d.model_score>=0&&d.model_score<=1);
+      return `<section class="local-subject"><h4>${esc(subjectName(subject))}</h4><p class="local-status">${esc(statuses[helmet?.status]||'Unavailable')}</p>${detections.length?`<ul>${detections.map(d=>`<li><strong>${d.label==='helmet'?'Helmet':'No helmet'}</strong> <span class="model-score" title="Exact raw model score: ${esc(String(d.model_score))}">${esc(d.model_score.toFixed(3))}</span> <small>raw model score</small></li>`).join('')}</ul>`:'<p>No usable specialist detection for this person. This does not establish whether a helmet is present.</p>'}<p class="hint">${esc(helmet?.reason||evidence.reason||'Evidence unavailable.')}</p>${list(item?.vehicle_candidates).length?`<p class="hint">Nearby vehicle candidates: ${item.vehicle_candidates.map(v=>esc(v.id)).join(', ')}. Geometry only; rider association unconfirmed.</p>`:''}</section>`;
+    }).join('');
+    const vehicles=subjects.filter(s=>['motorcycle','bicycle','car','bus','truck'].includes(s.kind));
+    const rows=['motorcycle','bicycle','car','bus','truck'].map(kind=>{const group=vehicles.filter(s=>s.kind===kind);return `<tr><th scope="row">${esc(kind)}</th><td>${group.length}</td><td>${group.filter(s=>s.origin==='detector').length}</td><td>${group.filter(s=>s.origin==='manual').length}</td></tr>`;}).join('');
+    return `<p class="hint">${esc(evidence.model?.name||'Local helmet specialist')} - ${evidence.state==='complete'?'Check complete':'Unavailable'}. ${esc(evidence.reason||'')}</p><p>Scores are raw model confidence, not accuracy or proof of a violation. Missing detections never mean "no helmet."</p><div class="local-subjects">${cards||'<p>No numbered person boxes in this image.</p>'}</div><h4>Vehicles in current numbered boxes: ${vehicles.length}</h4><p class="hint">Single selected image only, not a unique vehicle count across the clip. Manual and detector boxes may miss or duplicate vehicles.</p><div class="box-table-wrap"><table class="box-table"><thead><tr><th>Class</th><th>Count</th><th>Detector boxes</th><th>Manual boxes</th></tr></thead><tbody>${rows}</tbody></table></div>${view.annotations?.detector?.truncated||evidence.vehicle_counts?.truncated?'<p class="missing">Proposals were truncated to 12 boxes. Counts cover only retained, current boxes.</p>':''}${list(evidence.limitations).length?`<ul class="hint">${evidence.limitations.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`:''}`;
+  }
+  function vehicleEvidence(view){return view?.vehicle_type_evidence||view?.annotations?.vehicle_type_evidence;}
+  function renderVehicleEvidence(view){
+    const evidence=vehicleEvidence(view);if(!evidence)return '<p>Vehicle subtype evidence has not been recorded for this image.</p>';
+    if(evidence.state==='unavailable')return '<p><strong>Unavailable</strong></p><p>'+esc(evidence.reason)+'</p><p>No subtype conclusions or proposal counts are available from this check.</p>';
+    const score=d=>Number.isFinite(d.model_score)?`<span class="model-score" title="Exact raw model score: ${esc(String(d.model_score))}">${esc(d.model_score.toFixed(3))}</span>`:'Unavailable';
+    const statuses={candidate:'Subtype candidate',low_confidence:'Low confidence',unclear:'Ambiguous',not_observed:'Not observed',unavailable:'Unavailable'};
+    const entries=items=>list(items).map(d=>`<li>${esc(d.label)} ${score(d)} <small>raw model score</small>${d.reason?`<p class="hint">${d.reason==='ambiguous_vehicle_overlap'?'Overlaps multiple numbered vehicle boxes; association unconfirmed.':'No matching numbered vehicle box; association unconfirmed.'}</p>`:''}</li>`).join('');
+    const cards=list(evidence.subjects).filter(row=>row.status!=='not_applicable').map(row=>`<section class="local-subject"><h4>${esc(row.id)}</h4><p class="local-status">${esc(statuses[row.status]||'Unavailable')}</p>${list(row.candidates).length?`<ul>${entries(row.candidates)}</ul>`:'<p>No usable subtype candidate. This does not establish that no vehicle is present.</p>'}</section>`).join('');
+    return `<p class="hint">${esc(evidence.model?.name||'Local vehicle subtype specialist')} - ${esc(evidence.reason)}</p><p>Subtype labels and ID matches are candidates requiring visual review. Raw scores are not calibrated accuracy.</p><div class="local-subjects">${cards}</div><h4>Unmatched proposals</h4>${list(evidence.unassigned_detections).length?`<ul>${entries(evidence.unassigned_detections)}</ul>`:'<p>No unmatched proposals recorded.</p>'}<h4>Subtype proposal counts: ${esc(evidence.candidate_counts?.total??0)}</h4><p class="hint">Current image detector proposals with score at least 0.5; not verified objects, manual box counts, or unique video traffic. Lower-score candidates above are excluded from this count.</p><ul class="feature-values">${Object.entries(evidence.candidate_counts?.by_type||{}).map(([label,count])=>`<li><span>${esc(label)}</span><strong>${esc(count)}</strong></li>`).join('')}</ul><ul class="hint">${list(evidence.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+  }
+  function canSend(view,loaded,consent,available,busy){return !!view&&localReady(view)&&!view.model_result&&list(view.annotations?.subjects).length>0&&view.source_readiness?.available!==false&&!busy&&available===true&&consent===true&&list(view.frames).length>0&&view.frames.every(f=>f.available!==false&&f.url&&loaded.has(f.id));}
+  const helpers={sourceKind,selectedTime,validateView,renderPreview,renderResult,canSend,localEvidence,localReady,renderLocalEvidence,vehicleEvidence,renderVehicleEvidence};
   if(typeof module!=='undefined'&&module.exports)module.exports=helpers;
   if(!root.document)return;
   const $=id=>root.document.getElementById(id),token=root.document.querySelector('meta[name="traffic-token"]')?.content;
   if(!$('direct-panel'))return;
-  const state={view:null,media:null,file:null,config:null,available:false,busy:false,upload:null,generation:0,loaded:new Set(),libraryBusy:false,draft:[],dirty:false,editingResult:false,drag:null};
+  const state={view:null,media:null,file:null,config:null,available:false,busy:false,upload:null,generation:0,loaded:new Set(),libraryBusy:false,libraryPromise:null,mutationPromise:null,libraryRefreshQueued:false,draft:[],dirty:false,editingResult:false,drag:null,selectedFile:null,autoQueued:false,autoStarted:false,backendUnsupported:false,vehicleBackendUnsupported:false,features:{}};
   const storageKey='violation-lens-direct-review';
   function message(text,error=false){$('direct-message').textContent=text;$('direct-message').classList.toggle('error',error);}
-  async function api(path,data){const response=await root.fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Traffic-Token':token},body:JSON.stringify(data)});let value;try{value=await response.json();}catch{throw Error('The server returned an unreadable response. Recheck the connection and retry.');}if(!response.ok)throw Error(value.error||value.message||'The request failed.');return value;}
+  async function api(path,data){
+    const generation=state.generation;
+    const request=async()=>{const response=await root.fetch(path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Traffic-Token':token},body:JSON.stringify(data)});let value;try{value=await response.json();}catch{throw Error('The server returned an unreadable response. Recheck the connection and retry.');}if(!response.ok)throw Error(value.error||value.message||'The request failed.');return value;};
+    if(data===undefined)return request();
+    if(state.libraryPromise)await state.libraryPromise;
+    if(state.mutationPromise)try{await state.mutationPromise;}catch{}
+    if(generation!==state.generation)throw Error('The source changed before this request started.');
+    const pending=request();state.mutationPromise=pending;
+    try{return await pending;}finally{if(state.mutationPromise===pending)state.mutationPromise=null;}
+  }
+  const featureNames={localization:'Subject localization',helmet:'Helmet evidence',vehicles:'Vehicle class counts',types:'Vehicle subtype evidence'};
+  function feature(key,status,detail){state.features[key]={status,detail};renderFeatures();}
+  function renderFeatures(){
+    for(const key of Object.keys(featureNames)){
+      const value=state.features[key]||{status:'waiting',detail:'Waiting for an image.'};
+      $('direct-feature-'+key).dataset.status=value.status;
+      $('direct-feature-'+key+'-status').textContent=({waiting:'Waiting',running:'Processing locally',complete:'Complete',error:'Failed',unavailable:'Unavailable',unsupported:'Not applicable',stale:'Needs saved corrections'})[value.status]||value.status;
+      $('direct-feature-'+key+'-detail').textContent=value.detail;
+    }
+    $('direct-report-summary').innerHTML=Object.entries(featureNames).map(([key,name])=>{const value=state.features[key]||{status:'waiting',detail:'Waiting for an image.'};return `<li><strong>${esc(name)}</strong>: ${esc(value.status)}. ${esc(value.detail)}</li>`;}).join('');
+    $('direct-report').hidden=!state.view;
+    const rows=list(state.view?.annotations?.subjects);$('direct-feature-localization-output').innerHTML=rows.length?'<p class="hint">Current IDs: '+rows.map(row=>esc(row.id)).join(', ')+'</p>':'';
+    $('direct-feature-vehicles-output').innerHTML=state.view?.annotations?'<ul class="feature-values">'+['motorcycle','bicycle','car','bus','truck'].map(kind=>'<li><span>'+esc(kind)+'</span><strong>'+rows.filter(row=>row.kind===kind).length+'</strong></li>').join('')+'</ul>':'';
+  }
+  function featuresFromView(view){
+    const subjects=list(view.annotations?.subjects),evidence=localEvidence(view),types=vehicleEvidence(view),people=subjects.filter(s=>s.kind==='person').length,vehicles=subjects.length-people;
+    state.features=view.annotations?{
+      localization:{status:view.annotations.detector?.state==='unavailable'?'unavailable':'complete',detail:(view.annotations.detector?.state==='unavailable'?(view.annotations.detector.reason||'Subject detector unavailable. Add boxes manually.')+' ':'')+`${subjects.length} current numbered boxes (${people} people). Review IDs and correct missed or incorrect boxes.`},
+      vehicles:{status:'complete',detail:`${vehicles} vehicle boxes in this selected image. ${subjects.filter(s=>s.kind!=='person'&&s.origin==='manual').length} manual; ${subjects.filter(s=>s.kind!=='person'&&s.origin==='detector').length} detector. Not a clip traffic count.${view.annotations.detector?.truncated?' Detector proposals were truncated.':''}`},
+      helmet:{status:evidence?(evidence.state==='unavailable'?'unavailable':people?'complete':'unsupported'):'waiting',detail:evidence?(evidence.reason||'Saved local evidence restored.'):'Waiting for the local helmet specialist.'}
+    }:{localization:{status:'waiting',detail:'Image prepared. Waiting for subject localization.'},helmet:{status:'waiting',detail:'Needs numbered person boxes.'},vehicles:{status:'waiting',detail:'Needs numbered vehicle boxes.'}};
+    state.features.types={status:types?(types.state==='complete'?'complete':'unavailable'):'waiting',detail:types?(types.reason||'Saved subtype evidence restored.'):'Waiting for the local vehicle subtype specialist.'};
+    const report=view.feature_report;if(report?.features){const mapping={localization:'localization',helmet:'helmet',vehicles:'vehicle_counts',types:'vehicle_types'};for(const [key,source] of Object.entries(mapping)){const saved=report.features[source];if(saved&&saved.state==='unavailable')state.features[key]={status:'unavailable',detail:saved.summary||list(saved.errors).join(' ')};}}
+    renderFeatures();
+  }
+  function startQueuedImage(){if(state.autoQueued&&!state.autoStarted&&!state.busy&&!state.libraryBusy&&state.config&&$('direct-rights').checked){state.autoStarted=true;state.autoQueued=false;return prepare();}}
+  function selectSource(file){
+    if(file&&file===state.selectedFile)return;
+    const previousUpload=state.upload;state.generation++;state.upload=null;state.busy=false;previousUpload?.abort();
+    state.selectedFile=file||null;state.media=null;state.file=null;state.backendUnsupported=false;state.vehicleBackendUnsupported=false;state.autoStarted=false;clearView();
+    const kind=sourceKind(file?.name);state.autoQueued=kind==='image';state.features={};renderFeatures();
+    $('direct-upload-progress').hidden=true;$('direct-filename').textContent=file?.name||'No source selected.';$('direct-time-wrap').hidden=kind!=='video';$('direct-time').value='0';
+    message(kind==='image'?($('direct-rights').checked?'Starting all local checks for this image.':'Image queued. Confirm permission below to start all local checks.'):kind==='video'?'Choose a timestamp, confirm permission, then prepare this video frame.':'Choose a JPG, PNG, MP4, MOV or AVI file.',!kind);actions();return startQueuedImage();
+  }
   function actions(){
-    const file=$('direct-file').files?.[0],kind=sourceKind(file?.name),view=state.view;
+    const file=state.selectedFile||$('direct-file').files?.[0],kind=sourceKind(file?.name),view=state.view;
     $('direct-prepare').disabled=state.busy||!state.config||!kind||!$('direct-rights').checked;
     $('direct-prepare').textContent=state.media&&file===state.file?'Prepare selected frame':'Upload and preview';
-    for(const id of ['direct-file','direct-time','direct-rights','direct-consent','direct-note'])$(id).disabled=state.busy;
-    $('direct-cancel').hidden=!state.upload;
+    for(const id of ['direct-time','direct-rights','direct-consent','direct-note'])$(id).disabled=state.busy;
+    $('direct-cancel').hidden=!state.upload;$('direct-library-refresh').disabled=state.busy||state.libraryBusy;
+    $('direct-local-run').disabled=state.busy||state.dirty||state.backendUnsupported||!view?.annotations||view.source_readiness?.available===false;
+    $('direct-local-run').textContent=view?.model_result?'Run specialist models (clears Astra review)':'Run specialist models';
+    $('direct-vehicle-run').disabled=state.busy||state.dirty||state.vehicleBackendUnsupported||!view?.annotations||view.source_readiness?.available===false;
+    $('direct-vehicle-run').textContent=view?.model_result?'Run vehicle subtypes (clears Astra review)':'Run vehicle subtype model';
+    $('direct-vehicle-rerun-notice').hidden=!view?.model_result;
+    $('direct-local-rerun-notice').hidden=!view?.model_result;
+    $('direct-consent').disabled=state.busy||state.dirty||!localReady(view);
     $('direct-send').disabled=state.dirty||!canSend(view,state.loaded,$('direct-consent').checked,state.available,state.busy);
     const editingDisabled=state.busy||!view||(!!view.model_result&&!state.editingResult)||view.source_readiness?.available===false;
     $('direct-annotate').disabled=editingDisabled||!!view?.annotations;
@@ -82,14 +157,15 @@
     for(const input of $('direct-boxes').querySelectorAll('input,select,button'))input.disabled=editingDisabled;
     $('direct-send').hidden=!!view?.model_result;
     $('direct-consent').closest('label').hidden=!!view?.model_result;
-    for(const action of ['accept','reject','reset','export'])$('direct-'+action).disabled=state.busy||state.dirty||!view?.model_result;
+    for(const action of ['accept','reject','reset'])$('direct-'+action).disabled=state.busy||state.dirty||!view?.model_result;
+    $('direct-export').hidden=!view;$('direct-export').disabled=state.busy||state.dirty||!view;
     $('direct-edit-boxes').hidden=!view?.model_result||state.editingResult;
     $('direct-edit-boxes').disabled=state.busy||view?.source_readiness?.available===false;
     $('direct-cancel-box-edit').hidden=!state.editingResult;
     $('direct-cancel-box-edit').disabled=state.busy;
     for(const button of $('direct-library').querySelectorAll('[data-direct-open]'))button.disabled=state.busy;
   }
-  function clearView(){state.view=null;state.drag=null;state.dirty=false;state.editingResult=false;state.loaded.clear();$('direct-consent').checked=false;for(const id of ['direct-evidence','direct-result','direct-decision'])$(id).hidden=true;}
+  function clearView(){$('direct-drop-preview').hidden=true;$('direct-drop-preview').src='';state.view=null;state.drag=null;state.dirty=false;state.editingResult=false;state.loaded.clear();$('direct-consent').checked=false;for(const id of ['direct-evidence','direct-result','direct-decision','direct-local','direct-report','direct-vehicle-evidence'])$(id).hidden=true;}
   function remember(id){try{root.localStorage.setItem(storageKey,id);}catch{message('Review saved on the server. This browser cannot remember it; reopen it from saved image reviews.');}}
   const subjectKinds=['person','motorcycle','bicycle','car','bus','truck'];
   function drawEditor(redrawTable=true){
@@ -98,23 +174,52 @@
     const width=state.view?.annotations?.image_width||original?.width,height=state.view?.annotations?.image_height||original?.height;
     $('direct-box-overlay').innerHTML=width&&height?state.draft.map(s=>`<span class="subject-box" style="left:${100*s.bbox[0]/width}%;top:${100*s.bbox[1]/height}%;width:${100*(s.bbox[2]-s.bbox[0])/width}%;height:${100*(s.bbox[3]-s.bbox[1])/height}%"><b>${esc(s.id||'New')}</b></span>`).join(''):'';
   }
-  function edited(redrawTable=true){state.dirty=true;$('direct-consent').checked=false;drawEditor(redrawTable);$('direct-preview-status').textContent='Boxes changed. Save corrections to rebuild the exact context and crop previews before sending.';actions();}
+  function edited(redrawTable=true){state.dirty=true;for(const key of Object.keys(featureNames))feature(key,'stale','Boxes changed. Save corrections to rebuild the combined report.');$('direct-local-output').innerHTML='<p>Boxes changed. Save corrections to rerun the local checks.</p>';$('direct-result').hidden=true;$('direct-vehicle-output').innerHTML='<p>Boxes changed. Save corrections to rerun subtype checks.</p>';$('direct-consent').checked=false;drawEditor(redrawTable);$('direct-preview-status').textContent='Boxes changed. Save corrections to rebuild the exact context and crop previews before sending.';actions();}
   async function annotate(manual){
     const view=state.view;if(!view||state.busy||(view.model_result&&!(manual&&state.editingResult))||(!manual&&view.annotations))return;
-    const generation=state.generation;state.busy=true;$('direct-consent').checked=false;actions();message(manual?'Saving boxes and preparing exact crops locally.':'Detecting and numbering subjects locally. No image is being sent to ChatGPT.');
-    try{const data={review_id:view.review_id,fingerprint:view.fingerprint};if(manual)data.subjects=state.draft.map(s=>({...s,bbox:[...s.bbox]}));const result=await api('/api/direct-annotate',data);if(generation!==state.generation||state.view!==view)return;if(result.review_id!==view.review_id)throw Error('The annotation response belongs to another review. Reopen this review.');draw(result);message(result.annotations?.notice||'Numbered subjects prepared. Check for missed or incorrect boxes and inspect every outbound image.');loadLibrary();}
-    catch(error){if(generation===state.generation&&state.view===view)message(error.message+' You can add or correct boxes manually and save them.',true);}
-    finally{if(generation===state.generation){state.busy=false;actions();}}
+    const generation=state.generation;state.busy=true;feature('localization','running',manual?'Saving corrected subject boxes.':'Detecting and numbering subjects in the selected image.');feature('helmet','waiting','Waiting for numbered person boxes.');feature('vehicles','waiting','Waiting for numbered vehicle boxes.');$('direct-consent').checked=false;actions();message(manual?'Saving boxes and preparing exact crops locally.':'Detecting and numbering subjects locally. No image is being sent to ChatGPT.');
+    try{const data={review_id:view.review_id,fingerprint:view.fingerprint};if(manual)data.subjects=state.draft.map(s=>({...s,bbox:[...s.bbox]}));const result=await api('/api/direct-annotate',data);if(generation!==state.generation||state.view!==view)return;if(result.review_id!==view.review_id)throw Error('The annotation response belongs to another review. Reopen this review.');draw(result);await runLocalModels(true);if(generation===state.generation)await runVehicleModels(true);state.libraryRefreshQueued=true;}
+    catch(error){if(generation===state.generation&&state.view===view){feature('localization','error',error.message+' Add or correct boxes manually and save them.');feature('helmet','unavailable','No current numbered person boxes; save manual corrections to continue.');feature('vehicles','unavailable','No current numbered vehicle boxes; save manual corrections to continue.');$('direct-local').hidden=false;$('direct-local-output').innerHTML='<p>Subject localization failed. No helmet or vehicle conclusions are available. Add boxes manually to continue. This request error is not saved in the exported evidence.</p>';message(error.message+' You can add or correct boxes manually and save them.',true);}}
+    finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
+  }
+  async function runLocalModels(fromAnnotation=false){
+    const view=state.view;if(!view||(!fromAnnotation&&(state.busy||state.backendUnsupported))||state.dirty||!view.annotations)return;
+    const generation=state.generation;state.busy=true;$('direct-consent').checked=false;actions();message('Checking helmets locally. No image is being sent to ChatGPT.');feature('helmet','running','Checking the same selected image with the local specialist.');
+    $('direct-local').hidden=false;$('direct-local-output').innerHTML='<p role="status">Checking helmets locally...</p>';
+    try{
+      const result=await api('/api/direct-local-models',{review_id:view.review_id,fingerprint:view.fingerprint});
+      if(generation!==state.generation||state.view!==view)return;
+      if(result.review_id!==view.review_id)throw Error('The local evidence belongs to another review. Reopen this review.');
+      if(!localReady(result))throw Error('The local check did not return a completed or unavailable result.');
+      draw(result);message(localEvidence(result).state==='complete'?'Local checks saved. Review the scores and exact previews. Astra explanation is optional.':'Local specialist unavailable. Review the reason below; retry locally or request an optional Astra interpretation with consent.');state.libraryRefreshQueued=true;
+    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.backendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run specialist models.';feature('helmet',unsupported?'unavailable':'error',detail);$('direct-local-output').innerHTML='<p>'+esc(detail)+'</p><p>Subject localization and current numbered vehicle counts remain available above. No new helmet evidence was saved. This request error is shown here only; the export contains the saved evidence and its last recorded status.</p>';message(detail,true);}}
+    finally{if(generation===state.generation&&!fromAnnotation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
+  }
+  async function runVehicleModels(fromAnnotation=false){
+    const view=state.view;if(!view||(!fromAnnotation&&(state.busy||state.vehicleBackendUnsupported))||state.dirty||!view.annotations)return;
+    const generation=state.generation,priorHelmet=state.features.helmet;state.busy=true;$('direct-consent').checked=false;feature('types','running','Checking vehicle subtype proposals on the same selected image.');actions();message('Checking vehicle subtypes locally. No image is being sent to ChatGPT.');
+    $('direct-vehicle-evidence').hidden=false;$('direct-vehicle-output').innerHTML='<p>Checking vehicle subtype proposals locally...</p>';
+    try{
+      const result=await api('/api/direct-vehicle-types',{review_id:view.review_id,fingerprint:view.fingerprint});
+      if(generation!==state.generation||state.view!==view)return;
+      if(result.review_id!==view.review_id)throw Error('The subtype evidence belongs to another review. Reopen this review.');
+      if(!['complete','unavailable'].includes(vehicleEvidence(result)?.state))throw Error('The subtype check did not return a completed or unavailable result.');
+      draw(result);if(priorHelmet&&['error','unavailable'].includes(priorHelmet.status)){state.features.helmet=priorHelmet;renderFeatures();}
+      message('Local report updated. Review each feature result, including unavailable checks. Astra explanation is optional.');state.libraryRefreshQueued=true;
+    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.vehicleBackendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run vehicle subtype model.';feature('types',unsupported?'unavailable':'error',detail);$('direct-vehicle-output').innerHTML='<p>'+esc(detail)+'</p><p>Other completed features remain available. This request error is shown here only; the export contains saved evidence.</p>';message(detail,true);}}
+    finally{if(generation===state.generation&&!fromAnnotation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
   function draw(view){
-    state.view=validateView(view,state.config?.evidence_origin);const current=state.view,generation=state.generation;
+    state.view=validateView(view,state.config?.evidence_origin);const current=state.view,generation=state.generation;featuresFromView(current);
     state.loaded.clear();$('direct-consent').checked=false;$('direct-evidence').hidden=false;
     state.dirty=false;state.editingResult=false;state.draft=list(current.annotations?.subjects).map(s=>({id:s.id,kind:s.kind,bbox:[...s.bbox],origin:s.origin}));
     $('direct-annotation-editor').hidden=!!current.model_result;
-    const original=current.original_frame||current.frames[0];$('direct-editor-image').src=original?.available!==false?original?.url||'':'';
+    const original=current.original_frame||current.frames[0];$('direct-drop-preview').hidden=!original?.url||original.available===false;$('direct-drop-preview').src=original?.available!==false?original?.url||'':'';$('direct-editor-image').src=original?.available!==false?original?.url||'':'';
     $('direct-annotation-notice').textContent=(current.annotations?.notice||'Detect subjects locally or draw missing boxes. A person box does not establish a rider role.')+(current.annotations?.detector?.truncated?' The detector returned more than 12 proposals; only its 12 highest-confidence proposals were retained. Review the image for missing subjects. At most 12 boxes can be submitted: delete or replace boxes to include missed subjects.':'');
     drawEditor();
-    $('direct-source').textContent=`Source: ${current.source?.name||'Saved source'} · Image review: ${current.review_id}`;
+    $('direct-local').hidden=!current.annotations;$('direct-local-output').innerHTML=renderLocalEvidence(current);
+    $('direct-vehicle-evidence').hidden=!current.annotations;$('direct-vehicle-output').innerHTML=renderVehicleEvidence(current);
+    $('direct-source').textContent=`Source: ${current.source?.name||'Saved source'} - Image review: ${current.review_id}`;
     $('direct-source-warning').hidden=current.source_readiness?.available!==false;
     $('direct-source-warning').textContent=current.source_readiness?.available===false?'Historical assessment and your decision remain available. Current original frames cannot be verified. '+(current.source_readiness.reason||'Source unavailable.') : '';
     $('direct-provenance').hidden=!current.synthetic;
@@ -137,49 +242,65 @@
     state.config=results[0].status==='fulfilled'?results[0].value:null;
     const llm=results[1].status==='fulfilled'?results[1].value:null;state.available=llm?.available===true;
     $('direct-account').textContent=state.available?'Using your ChatGPT plan. This action requests Astra image review.':'Astra image review needs your ChatGPT connection. Use Connect ChatGPT above, then Recheck connection. '+(llm?.message||'');
-    if(!state.config)message('Could not connect to the local server. Check that it is running, then choose Recheck connection.',true);actions();
+    if(!state.config)message('Could not connect to the local server. Check that it is running, then choose Recheck connection.',true);actions();startQueuedImage();
   }
   function upload(file){return new Promise((resolve,reject)=>{
-    const xhr=new root.XMLHttpRequest();state.upload=xhr;$('direct-upload-progress').hidden=false;$('direct-upload-progress').value=0;actions();
+    const xhr=new root.XMLHttpRequest(),generation=state.generation;state.upload=xhr;$('direct-upload-progress').hidden=false;$('direct-upload-progress').value=0;actions();
     xhr.open('POST','/api/upload?name='+encodeURIComponent(file.name));xhr.setRequestHeader('X-Traffic-Token',token);xhr.setRequestHeader('Content-Type','application/octet-stream');
-    xhr.upload.onprogress=event=>{if(event.lengthComputable){$('direct-upload-progress').value=Math.round(event.loaded/event.total*100);message('Uploading source: '+$('direct-upload-progress').value+'%.');}};
+    xhr.upload.onprogress=event=>{if(generation===state.generation&&event.lengthComputable){$('direct-upload-progress').value=Math.round(event.loaded/event.total*100);message('Uploading source: '+$('direct-upload-progress').value+'%.');}};
     xhr.onload=()=>{let body;try{body=JSON.parse(xhr.responseText);}catch{return reject(Error('The upload response could not be read. Retry upload.'));}if(xhr.status<200||xhr.status>=300)return reject(Error(body.error||'Upload failed. Retry upload.'));resolve(body);};
     xhr.onerror=()=>reject(Error('Upload failed. Check the local server and retry.'));xhr.onabort=()=>reject(Error('Upload cancelled. You can choose another source or retry.'));xhr.send(file);
   });}
   async function prepare(){
     if($('direct-prepare').disabled||state.busy)return;
-    const file=$('direct-file').files?.[0];let time;try{time=selectedTime($('direct-time').value,sourceKind(file?.name));}catch(error){message(error.message,true);return;}
-    const generation=++state.generation;state.busy=true;actions();message('Preparing your local preview. No image is being sent to ChatGPT.');
+    const file=state.selectedFile||$('direct-file').files?.[0];let time;try{time=selectedTime($('direct-time').value,sourceKind(file?.name));}catch(error){message(error.message,true);return;}
+    const generation=++state.generation;state.busy=true;feature('localization','running','Uploading and preparing the shared source image.');actions();message('Preparing your local preview. No image is being sent to ChatGPT.');
     try{
+      if(state.libraryPromise)await state.libraryPromise;
+      if(state.mutationPromise){feature('localization','waiting','Waiting for the previous local check to finish before uploading this replacement.');try{await state.mutationPromise;}catch{}}
+      if(generation!==state.generation)return;
       if(!state.media||state.file!==file){const media=await upload(file);if(generation!==state.generation)return;if(!media.id||!media.source_revision)throw Error('Upload identity is incomplete. Retry upload.');state.media=media;state.file=file;}
       state.upload=null;$('direct-upload-progress').hidden=true;actions();
-      const view=await api('/api/direct-prepare',{media:state.media.id,source_revision:state.media.source_revision,timestamp:time});if(generation!==state.generation)return;draw(view);message('Preview prepared locally. Detect and number subjects, then check the boxes before sending.');loadLibrary();
-    }catch(error){if(generation===state.generation)message(error.message,true);}
-    finally{if(generation===state.generation){state.upload=null;state.busy=false;$('direct-upload-progress').hidden=true;actions();}}
+      const view=await api('/api/direct-prepare',{media:state.media.id,source_revision:state.media.source_revision,timestamp:time});if(generation!==state.generation)return;draw(view);message('Preview prepared locally. Starting checks for the same selected image.');state.libraryRefreshQueued=true;state.busy=false;actions();await annotate(false);
+    }catch(error){if(generation===state.generation){feature('localization','error',error.message);feature('helmet','unavailable','Source preparation failed.');feature('vehicles','unavailable','Source preparation failed.');message(error.message,true);}}
+    finally{if(generation===state.generation){state.upload=null;state.busy=false;$('direct-upload-progress').hidden=true;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
-  async function open(id){if(state.busy)return;const generation=++state.generation;state.busy=true;clearView();actions();message('Opening saved image review. No new model request is made.');try{const view=await api('/api/direct-review?id='+encodeURIComponent(id));if(generation!==state.generation)return;if(view.review_id!==id)throw Error('The returned review does not match the selected review.');draw(view);message(view.model_result?'Saved Astra assessment restored. No new model request was made.':'Prepared review restored. Inspect its image before choosing to send.');}catch(error){if(generation===state.generation)message(error.message,true);}finally{if(generation===state.generation){state.busy=false;actions();}}}
+  async function open(id){if(state.busy)return;const generation=++state.generation;state.busy=true;clearView();actions();message('Opening saved image review. No new model request is made.');try{const view=await api('/api/direct-review?id='+encodeURIComponent(id));if(generation!==state.generation)return;if(view.review_id!==id)throw Error('The returned review does not match the selected review.');draw(view);message(view.model_result?'Saved Astra assessment restored. No new model request was made.':'Prepared review restored. Inspect its image before choosing to send.');}catch(error){if(generation===state.generation)message(error.message,true);}finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}}
   async function mutate(action){
     const view=state.view;if(!view||state.busy)return;
     if(action==='analyze'&&(state.dirty||!canSend(view,state.loaded,$('direct-consent').checked,state.available,false)))return;
-    if(action!=='analyze'&&(!view.model_result||state.dirty))return;
+    if(action==='export'&&state.dirty)return;
+    if(!['analyze','export'].includes(action)&&(!view.model_result||state.dirty))return;
     const generation=state.generation;state.busy=true;actions();message(action==='analyze'?'Astra is reviewing the selected image. Keep this page open while the request completes.':'Saving your local review.');
     try{
       const data={review_id:view.review_id,fingerprint:view.fingerprint};
       if(action==='analyze')data.consent=true;else if(action!=='export'){data.decision=action;data.note=$('direct-note').value;}
       const result=await api('/api/direct-'+(action==='analyze'?'analyze':action==='export'?'export':'decision'),data);
       if(generation!==state.generation||state.view!==view)return;
-      if(action==='export'){const url=localURL(result.url,state.config?.evidence_origin);if(!url)throw Error('The export download address is invalid.');const link=root.document.createElement('a');link.href=url;link.download=result.filename||'astra-image-review.json';root.document.body.append(link);link.click();link.remove();message('Review JSON exported with the model assessment and separate human disposition.');}
+      if(action==='export'){const url=localURL(result.url,state.config?.evidence_origin);if(!url)throw Error('The export download address is invalid.');const link=root.document.createElement('a');link.href=url;link.download=result.filename||'astra-image-review.json';root.document.body.append(link);link.click();link.remove();message('Review JSON exported with local evidence, any Astra interpretation, and separate human disposition.');}
       else{if(result.review_id!==view.review_id||result.fingerprint!==view.fingerprint)throw Error('The returned review identity changed. Reopen the saved review before continuing.');draw(result);message(action==='analyze'?'Astra assessment saved. Read the uncertainty and add your review decision.':'Your disposition was saved separately from the model assessment.');loadLibrary();}
     }catch(error){if(generation===state.generation)message(error.message+(action==='analyze'?' No alternate model or paid API fallback will be used. Reopen the saved review before retrying if the result is uncertain.':''),true);}
-    finally{if(generation===state.generation){state.busy=false;actions();}}
+    finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
-  async function loadLibrary(){if(state.libraryBusy)return;state.libraryBusy=true;$('direct-library-refresh').disabled=true;try{const response=await api('/api/direct-library');const reviews=Array.isArray(response)?response:list(response.reviews);$('direct-library').innerHTML=reviews.map(item=>`<div class="saved-run"><div><p>${esc(item.source?.name||'Saved image review')}</p><small>${esc(item.review_id)}${item.synthetic?' · Synthetic':''}</small></div><button type="button" class="secondary" data-direct-open="${esc(item.review_id)}">Open image review</button></div>`).join('');$('direct-library-message').textContent=reviews.length?'Reopening shows saved output without a new model request.':'No saved image reviews yet.';}catch(error){$('direct-library-message').textContent='Could not load image reviews: '+error.message;}finally{state.libraryBusy=false;$('direct-library-refresh').disabled=false;actions();}}
-  $('direct-file').addEventListener('change',()=>{if(state.busy)return;state.generation++;state.media=null;state.file=null;clearView();const file=$('direct-file').files?.[0],kind=sourceKind(file?.name);$('direct-filename').textContent=file?.name||'No source selected.';$('direct-time-wrap').hidden=kind!=='video';$('direct-time').value='0';$('direct-rights').checked=false;message(kind?'Confirm permission, then upload and preview.':'Choose a JPG, PNG, MP4, MOV or AVI file.',!kind);actions();});
+  function loadLibrary(){
+    if(state.busy){state.libraryRefreshQueued=true;return state.libraryPromise||Promise.resolve();}
+    if(state.libraryPromise)return state.libraryPromise;
+    state.libraryBusy=true;state.libraryRefreshQueued=false;$('direct-library-refresh').disabled=true;
+    const pending=(async()=>{try{const response=await api('/api/direct-library');const reviews=Array.isArray(response)?response:list(response.reviews);$('direct-library').innerHTML=reviews.map(item=>`<div class="saved-run"><div><p>${esc(item.source?.name||'Saved image review')}</p><small>${esc(item.review_id)}${item.synthetic?' - Synthetic':''}</small></div><button type="button" class="secondary" data-direct-open="${esc(item.review_id)}">Open image review</button></div>`).join('');$('direct-library-message').textContent=reviews.length?'Reopening shows saved output without a new model request.':'No saved image reviews yet.';}catch(error){$('direct-library-message').textContent='Could not load image reviews: '+error.message;}finally{state.libraryBusy=false;actions();}})();
+    state.libraryPromise=pending;
+    return pending.finally(()=>{if(state.libraryPromise===pending)state.libraryPromise=null;startQueuedImage();});
+  }
+  $('direct-file').addEventListener('change',()=>selectSource($('direct-file').files?.[0]));
+  for(const name of ['dragenter','dragover'])$('direct-drop-zone').addEventListener(name,event=>{event.preventDefault();$('direct-drop-zone').classList.toggle('drag-active',true);});
+  $('direct-drop-zone').addEventListener('dragleave',()=> $('direct-drop-zone').classList.toggle('drag-active',false));
+  $('direct-drop-zone').addEventListener('drop',event=>{event.preventDefault();$('direct-drop-zone').classList.toggle('drag-active',false);const files=Array.from(event.dataTransfer?.files||[]);if(files.length!==1){message('Drop one image or video at a time.',true);return;}return selectSource(files[0]);});
   $('direct-time').addEventListener('input',()=>{if(state.busy)return;state.generation++;clearView();message('Timestamp changed. Prepare the selected frame before sending.');actions();});
-  for(const id of ['direct-rights','direct-consent'])$(id).addEventListener('change',actions);
+  $('direct-rights').addEventListener('change',()=>{actions();return startQueuedImage();});$('direct-consent').addEventListener('change',actions);
   $('direct-prepare').addEventListener('click',prepare);$('direct-cancel').addEventListener('click',()=>state.upload?.abort());$('direct-send').addEventListener('click',()=>mutate('analyze'));
   $('direct-edit-boxes').addEventListener('click',()=>{if(state.busy||!state.view?.model_result||state.view.source_readiness?.available===false)return;state.editingResult=true;$('direct-consent').checked=false;$('direct-annotation-editor').hidden=false;message('Editing boxes. The current assessment remains saved until you save corrections. Saving changes clears that assessment and your review decision.');actions();});
   $('direct-cancel-box-edit').addEventListener('click',()=>{if(state.busy||!state.editingResult)return;draw(state.view);message('Box edits discarded. The saved assessment and decision are unchanged.');});
+  $('direct-vehicle-run').addEventListener('click',()=>runVehicleModels());
+  $('direct-local-run').addEventListener('click',()=>runLocalModels());
   $('direct-annotate').addEventListener('click',()=>annotate(false));$('direct-save-boxes').addEventListener('click',()=>annotate(true));
   $('direct-add-box').addEventListener('click',()=>{if(state.busy||!state.view||(state.view.model_result&&!state.editingResult)||state.draft.length>=12)return;const f=state.view.original_frame||state.view.frames[0];state.draft.push({kind:$('direct-new-kind').value||'person',bbox:[0,0,Math.max(1,Math.round(f.width/4)),Math.max(1,Math.round(f.height/4))],origin:'manual'});edited();});
   function updateBox(event,redrawTable){if(state.busy||(state.view?.model_result&&!state.editingResult))return;const input=event.target,i=Number(input.dataset.boxIndex),field=input.dataset.boxField,s=state.draft[i];if(!s||field===undefined)return;if(field==='kind'){if((s.kind==='person')!==(input.value==='person'))delete s.id;s.kind=input.value;}else s.bbox[Number(field)]=Number(input.value);s.origin='manual';edited(redrawTable);}
@@ -193,5 +314,5 @@
   for(const action of ['accept','reject','reset','export'])$('direct-'+action).addEventListener('click',()=>mutate(action));
   $('direct-library-refresh').addEventListener('click',loadLibrary);$('direct-library').addEventListener('click',event=>{const button=event.target.closest('[data-direct-open]');if(button&&!button.disabled)open(button.dataset.directOpen);});
   $('refresh-chatgpt').addEventListener('click',connection);
-  (async()=>{await connection();await loadLibrary();let id;try{id=root.localStorage.getItem(storageKey);}catch{}if(id)await open(id);actions();})();
+  (async()=>{await connection();await loadLibrary();let id;try{id=root.localStorage.getItem(storageKey);}catch{}if(id&&!state.selectedFile)await open(id);actions();})();
 })(typeof window!=='undefined'?window:globalThis);
