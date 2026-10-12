@@ -220,6 +220,7 @@
     $('direct-local').hidden=!current.annotations;$('direct-local-output').innerHTML=renderLocalEvidence(current);
     $('direct-vehicle-evidence').hidden=!current.annotations;$('direct-vehicle-output').innerHTML=renderVehicleEvidence(current);
     $('direct-source').textContent=`Source: ${current.source?.name||'Saved source'} - Image review: ${current.review_id}`;
+    if(!state.selectedFile)$('direct-filename').textContent='Saved review source: '+(current.source?.name||'Saved source')+'. Choose a file to start a new review.';
     $('direct-source-warning').hidden=current.source_readiness?.available!==false;
     $('direct-source-warning').textContent=current.source_readiness?.available===false?'Historical assessment and your decision remain available. Current original frames cannot be verified. '+(current.source_readiness.reason||'Source unavailable.') : '';
     $('direct-provenance').hidden=!current.synthetic;

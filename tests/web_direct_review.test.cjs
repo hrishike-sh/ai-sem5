@@ -312,3 +312,9 @@ test('only the latest replacement starts after an active inference fails; no old
   const drop=name=>h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name}]}});
   const first=drop('old.jpg');h.uploads[0].finish();await h.settle();const skipped=drop('skip.jpg'),latest=drop('latest.jpg');assert.equal(h.uploads.length,1);release({error:'Previous detector failed.'});await first;await skipped;await h.settle();assert.equal(h.uploads.length,2);assert.equal(h.uploads[1].body.name,'latest.jpg');h.uploads[1].finish();await latest;assert.equal(h.requests.filter(r=>r.path==='/api/direct-local-models').length,1);assert.equal(h.requests.filter(r=>r.path==='/api/direct-vehicle-types').length,1);assert.equal(h.element('direct-filename').textContent,'latest.jpg');assert.doesNotMatch(h.element('direct-message').textContent,/Previous detector failed/);
 });
+
+
+test('restored reviews name their saved source without populating the file input or rerunning inference',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({source:{name:'indian_riders.png',kind:'image'}}):undefined,'review-1');await h.settle();
+  assert.equal(h.element('direct-filename').textContent,'Saved review source: indian_riders.png. Choose a file to start a new review.');assert.equal(h.element('direct-file').files.length,0);assert.equal(h.uploads.length,0);assert.equal(h.requests.some(r=>r.options.method==='POST'),false);
+});
