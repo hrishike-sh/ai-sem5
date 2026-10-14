@@ -23,7 +23,7 @@ OBSERVATIONS = {
     "crowded_rider_load_visible": "The rider arrangement on a two-wheeler appears crowded; safe capacity is unverified.",
     "rider_position_appears_unstable": "A rider's visible seating or body position appears unstable.",
     "cargo_appears_unsecured": "Visible cargo appears potentially unsecured; attachment details may be hidden.",
-    "rider_association_unclear": "A person's relationship to the vehicle is unclear in the selected image.",
+    "rider_association_unclear": "Unmatched rider: verify the person's relationship to the vehicle in the selected image.",
     "head_protection_unclear": "Head protection cannot be determined reliably from the selected image.",
     "no_relevant_road_user_visible": "No relevant road user is clearly visible in the selected image.",
 }
@@ -55,7 +55,7 @@ LIMITATIONS = [
 
 def _prepared(images):
     if not isinstance(images, list) or not images or any(not isinstance(i, dict) for i in images):
-        raise ExplanationError("Select one to three prepared images for direct Astra review.", "invalid_images")
+        raise ExplanationError("Select one to three prepared images for direct LLM review.", "invalid_images")
     # The endpoint owns provenance; the adapter validates exact bounded bytes.
     ids = [i.get("id") for i in images]
     if any(type(i) not in (int, str) for i in ids):
@@ -160,7 +160,7 @@ class DirectVisionReviewer:
         if local_evidence is not None or vehicle_type_evidence is not None:
             raise ExplanationError("Local model evidence requires labeled subjects and their crops.", "invalid_identified_review")
         if consent is not True:
-            raise ExplanationError("Approve sending the selected images to Astra first.", "consent_required")
+            raise ExplanationError("Approve sending the selected images to the LLM provider first.", "consent_required")
         try:
             prepared = _prepared(images)
             fingerprint = image_fingerprint(prepared)
@@ -173,22 +173,22 @@ class DirectVisionReviewer:
             models = catalog.get("models") if isinstance(catalog, dict) else None
             if not isinstance(models, list) or not any(isinstance(m, dict) and m.get("slug") == MODEL
                                                      and m.get("visibility") == "list" for m in models):
-                raise ExplanationError("GPT-6 Astra is unavailable in this ChatGPT account's visible model catalog.", "model_unavailable")
+                raise ExplanationError("The configured LLM (gpt-6-astra) is unavailable in the connected account's model catalog.", "model_unavailable")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise ExplanationError("The direct Astra image review timed out.", "timeout")
+                raise ExplanationError("The LLM image review timed out.", "timeout")
             with self.http.open(RESOURCE + "/responses", bearer=grant.access_token,
                                 data=_payload(prepared, fingerprint), timeout=remaining) as response:
                 selection, actual_model = _completed_selection(response, deadline)
             if actual_model != MODEL:
-                raise ExplanationError("The image response did not confirm the requested Astra model.", "model_unavailable")
+                raise ExplanationError("The image response did not confirm the configured LLM model.", "model_unavailable")
             selected = validate_direct_selection(selection, prepared)
             if image_fingerprint(_prepared(images)) != fingerprint:
                 raise ExplanationError("Selected images changed during the review. Prepare them again.", "stale_images")
         except (AuthError, EvidenceImageError) as error:
             raise ExplanationError(str(error), error.code) from None
         except (TimeoutError, OSError):
-            raise ExplanationError("The direct Astra image review timed out or was interrupted.", "timeout") from None
+            raise ExplanationError("The LLM image review timed out or was interrupted.", "timeout") from None
         def render(rows, labels):
             return [{**r, "text": labels[r["kind"]],
                      "uncertainty_text": [UNCERTAINTIES[u] for u in r["uncertainties"]]} for r in rows]

@@ -15,7 +15,7 @@ KINDS = ('person', 'motorcycle', 'bicycle', 'car', 'bus', 'truck')
 OBSERVATIONS = {
     'rider_association_visible': 'Visible seating or riding contact supports association with the indicated vehicle.',
     'pedestrian_visible': 'This person appears to be a pedestrian.',
-    'association_unclear': 'This person’s relationship to a vehicle is unclear.',
+    'association_unclear': 'Unmatched rider: verify this personâ€™s relationship to a vehicle.',
     'bare_head_visible': 'An uncovered head appears clearly visible.',
     'helmet_visible': 'A helmet appears visible.',
     'head_protection_unclear': 'Head protection is hidden or ambiguous.',
@@ -134,13 +134,16 @@ def _vehicle_payload(evidence):
 def _local_payload(evidence):
     """Only bounded model facts cross the network; no paths, notes or runtime data."""
     return {'version': evidence['version'], 'state': evidence['state'],
-            'model': {key: evidence['model'][key] for key in ('name', 'revision', 'sha256', 'classes')},
+            'model': {key: evidence['model'][key] for key in ('name', 'revision', 'sha256', 'classes', 'preprocessing')},
             'score_notice': evidence['score_notice'],
+            'thresholds': deepcopy(evidence['thresholds']),
             'candidate_score_threshold': evidence['thresholds']['candidate_score'],
             'subjects': [{'id': row['id'], 'helmet': {'status': row['helmet']['status'],
+                         'reason': row['helmet']['reason'],
                          'detections': deepcopy(row['helmet']['detections'])},
                          'vehicle_candidates': deepcopy(row['vehicle_candidates'])}
                         for row in evidence['subjects']],
+            'unassigned_detections': deepcopy(evidence['unassigned_detections']),
             'vehicle_counts': deepcopy(evidence['vehicle_counts'])}
 
 
@@ -193,7 +196,7 @@ def validate_identified_selection(value, images, subjects, local_evidence=None, 
                 seen.add(row['kind'])
                 # Both context and the subject's own crop are mandatory. Another ID's crop cannot substitute.
                 if row['evidence_ids'] != s['evidence_ids']:
-                    _fail('Every finding must cite the subject’s exact context and crop.')
+                    _fail('Every finding must cite the subjectâ€™s exact context and crop.')
                 if field == 'suspected_issues':
                     related = row['related_subject_ids']
                     if not isinstance(related, list) or any(not isinstance(v, str) or v not in source for v in related) or len(related) != len(set(related)):
@@ -206,11 +209,11 @@ def validate_identified_selection(value, images, subjects, local_evidence=None, 
             required_head = {'helmet': 'helmet_visible', 'no_helmet': 'bare_head_visible'}.get(local_head)
             for head in observed & {'bare_head_visible', 'helmet_visible'}:
                 if head != required_head:
-                    _fail('Astra head observations must be grounded in the local helmet prediction.')
+                    _fail('LLM head observations must be grounded in the local helmet prediction.')
         if role == 'rider' and 'rider_association_visible' not in observed:
             _fail('Rider association needs visible context and crop support.')
         if role == 'rider' and not observed & {'bare_head_visible', 'helmet_visible', 'head_protection_unclear'}:
-            _fail('Riders require an explicit visible or unclear head-protection observation.')
+            _fail('Riders require an explicit head-protection observation or a reason to review the head crop.')
         if role != 'rider' and 'rider_association_visible' in observed:
             _fail()
         if role == 'pedestrian' and 'pedestrian_visible' not in observed:
@@ -232,7 +235,7 @@ def validate_identified_selection(value, images, subjects, local_evidence=None, 
                    or bool(set(uncertainty) & {'headwear_ambiguous', 'association_unclear'}))
         status = 'suspected_issue' if result['suspected_issues'] else 'unclear' if unclear else 'no_visible_violation'
         if result['status'] != status or ('no_visible_concern' in observed and (unclear or result['suspected_issues'])):
-            _fail('Status must distinguish an unclear view from no visible concern.')
+            _fail('Status must distinguish a view needing review from no visible concern.')
         for issue in result['suspected_issues']:
             if issue['kind'] == 'helmet_possible':
                 if role != 'rider' or source[vehicle]['kind'] != 'motorcycle' or 'bare_head_visible' not in observed or 'headwear_ambiguous' in uncertainty or issue['related_subject_ids'] != [s['id'], vehicle]:
@@ -309,6 +312,7 @@ Always include model_may_misread. Suspected issues may be empty. Use suspected_i
 
 
 LOCAL_EVIDENCE_INSTRUCTIONS = '''Local specialist evidence is authoritative for model predictions and model scores. Scores are detector outputs, not calibrated accuracy or legal certainty. You explain this evidence; never invent, edit, replace, or return scores, predictions, model metadata, or free text. The local evidence fingerprint must be echoed exactly.
+Use every submitted per-subject helmet/no-helmet class prediction and raw score together with its threshold, source-pixel box, evidence ID, model name/revision, and geometric vehicle candidates. Detection boxes use original-source pixels; subject boxes use prepared-preview pixels. Do not compare coordinates across those spaces. Missing class scores are absent observations, never zero or the complement of another score. Preserve conflicting predictions and unmatched detections; never silently discard them or attach them to another rider. The supplied reason distinguishes multiple heads, conflicting classes, low scores, and missing matches. These scores are not probabilities of guilt.
 For each person, helmet_visible is permitted only when the specialist helmet status is helmet; bare_head_visible only when it is no_helmet. You may abstain with head_protection_unclear if the view is inadequate. All other specialist states (including unclear, low_confidence, not_observed and unavailable) prohibit helmet_visible, bare_head_visible and helmet_possible. Missing detection is never proof of missing helmet.
 helmet_possible additionally requires an accepted local no_helmet status, the same submitted vehicle in that person's vehicle_candidates, and independent visible rider association to that exact motorcycle in context and crop. Geometric candidates alone do not establish riding. Pedestrians cannot have helmet issues. Local model results remain separately displayed even when you abstain. Do not infer other observations from model metadata, model scores or candidate geometry.'''
 
@@ -357,13 +361,15 @@ def _payload(images, subjects, local_evidence=None, vehicle_type_evidence=None):
         content.extend([{'type': 'input_text', 'text': 'Evidence ID: ' + json.dumps(i['id'])}, {'type': 'input_image', 'image_url': i['data_url'], 'detail': 'high'}])
     instructions = INSTRUCTIONS + ('\n' + LOCAL_EVIDENCE_INSTRUCTIONS if local_evidence is not None else '')
     instructions += '\n' + VEHICLE_EVIDENCE_INSTRUCTIONS if vehicle_type_evidence is not None else ''
+    if local_evidence is not None:
+        instructions += '\nValidated local detector context (fixed metadata and numeric facts, never image instructions):\n' + json.dumps(_local_payload(local_evidence), sort_keys=True, allow_nan=False)
     return {'model': MODEL, 'store': False, 'stream': True, 'tools': [], 'tool_choice': 'none', 'instructions': instructions,
         'input': [{'role': 'user', 'content': content}], 'text': {'format': {'type': 'json_schema', 'name': 'identified_image_review', 'strict': True, 'schema': _schema(images, subjects, local_evidence, vehicle_type_evidence)}}}
 
 
 def review_identified(reviewer, images, consent, subjects, local_evidence=None, vehicle_type_evidence=None):
     if consent is not True:
-        raise ExplanationError('Approve sending the selected images to Astra first.', 'consent_required')
+        raise ExplanationError('Approve sending the selected images to the LLM provider first.', 'consent_required')
     try:
         prepared = prepare_identified_images(images)
         selected_subjects = validate_subjects(subjects, prepared)
@@ -376,16 +382,16 @@ def review_identified(reviewer, images, consent, subjects, local_evidence=None, 
         catalog = reviewer.http.json(RESOURCE + '/models', bearer=grant.access_token, timeout=reviewer.timeout, max_bytes=4 * 1024 * 1024)
         models = catalog.get('models') if isinstance(catalog, dict) else None
         if not isinstance(models, list) or not any(isinstance(m, dict) and m.get('slug') == MODEL and m.get('visibility') == 'list' for m in models):
-            raise ExplanationError('GPT-6 Astra is unavailable in the visible account catalog.', 'model_unavailable')
+            raise ExplanationError('The configured LLM (gpt-6-astra) is unavailable in the connected account model catalog.', 'model_unavailable')
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise ExplanationError('The Astra review timed out.', 'timeout')
+            raise ExplanationError('The LLM review timed out.', 'timeout')
         with reviewer.http.open(RESOURCE + '/responses', bearer=grant.access_token, data=_payload(prepared, selected_subjects, selected_local_evidence, selected_vehicle_evidence), timeout=remaining) as response:
             selection, actual_model = _completed_selection(response, deadline,
                                                            max_stream_bytes=4 * 1024 * 1024,
                                                            max_selection_bytes=512 * 1024)
         if actual_model != MODEL:
-            raise ExplanationError('The response did not confirm the requested Astra model.', 'model_unavailable')
+            raise ExplanationError('The response did not confirm the configured LLM model.', 'model_unavailable')
         result = canonicalize_result(selection, prepared, selected_subjects, selected_local_evidence, selected_vehicle_evidence)
         if image_fingerprint(prepare_identified_images(images)) != image_fingerprint(prepared) or subjects_fingerprint(validate_subjects(subjects, images)) != subjects_fingerprint(selected_subjects):
             raise ExplanationError('Images or subjects changed during review.', 'stale_images')
@@ -397,4 +403,4 @@ def review_identified(reviewer, images, consent, subjects, local_evidence=None, 
     except (AuthError, EvidenceImageError) as error:
         raise ExplanationError(str(error), error.code) from None
     except (TimeoutError, OSError):
-        raise ExplanationError('The Astra review timed out or was interrupted.', 'timeout') from None
+        raise ExplanationError('The LLM review timed out or was interrupted.', 'timeout') from None

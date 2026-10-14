@@ -23,7 +23,7 @@ def test_pending_helmet_preserves_localization_and_counts():
     counts = report['features']['vehicle_counts']
     assert counts['state'] == 'complete' and counts['data']['total'] == 2
     assert counts['data']['by_kind']['motorcycle'] == {'total': 1, 'manual': 1, 'detector': 0}
-    assert report['summary']['pending_features'] == ['helmet', 'vehicle_types']
+    assert report['summary']['pending_features'] == ['helmet', 'vehicle_types', 'plates']
     assert report['summary']['vehicle_count'] == 2
 
 
@@ -111,7 +111,7 @@ def test_vehicle_type_feature_is_independent_and_validated(monkeypatch):
     assert checked == [(specialist, data['subjects'])]
     assert report['features']['vehicle_types']['state'] == 'unavailable'
     assert report['summary']['unavailable_features'] == ['vehicle_types']
-    assert report['summary']['pending_features'] == ['helmet']
+    assert report['summary']['pending_features'] == ['helmet', 'plates']
     assert report['summary']['completed_features'] == ['localization', 'vehicle_counts']
     report['features']['vehicle_types']['data']['evidence']['reason'] = 'changed'
     assert specialist['reason'] == 'Synthetic specialist unavailable.'

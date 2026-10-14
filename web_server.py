@@ -449,16 +449,20 @@ class Lab:
             return self.direct_reviews.run_models(data)
         if route == '/api/direct-vehicle-types':
             return self.direct_reviews.run_vehicle_types(data)
+        if route == '/api/direct-plates':
+            return self.direct_reviews.run_plates(data)
+        if route == '/api/direct-plate-correction':
+            return self.direct_reviews.correct_plate(data)
         if route == '/api/direct-analyze':
             if data.get('consent') is not True:
-                raise ValueError('Preview the exact image and approve sending it to Astra first.')
+                raise ValueError('Preview the exact image and approve sending it to the LLM provider first.')
             prepared = self.direct_reviews.load(data)
             subjects = prepared.get('subjects')
             if not subjects:
-                raise ValueError('Detect or correct the numbered subject boxes and preview them before sending to Astra.')
+                raise ValueError('Detect or correct the numbered subject boxes and preview them before LLM review.')
             local_evidence = prepared.get('local_evidence')
             if not local_evidence or local_evidence.get('state') not in ('complete', 'unavailable'):
-                raise ValueError('Run the local specialist models before sending this review to Astra.')
+                raise ValueError('Run the local specialist models before requesting LLM review.')
             result = self.direct_vision.review(prepared['images'], consent=True, subjects=subjects,
                                               local_evidence=local_evidence,
                                               vehicle_type_evidence=prepared.get('vehicle_type_evidence'))
@@ -762,7 +766,7 @@ def create_server(port=8521):
                 static = {"/": "violation_lens.html", "/ai": "violation_lens.html", "/ai/": "violation_lens.html",
                           "/studio": "index.html", "/studio/": "index.html",
                           "/violation_lens.js": "violation_lens.js", "/violation_lens.css": "violation_lens.css",
-                          "/direct_review.js": "direct_review.js",
+                          "/direct_review.js": "direct_review.js", "/evidence_table.js": "evidence_table.js",
                           "/app.js": "app.js", "/ivp_features.js":"ivp_features.js", "/styles.css": "styles.css"}
                 if route not in static:
                     return self.respond({"error": "Not found"}, 404)

@@ -65,6 +65,17 @@ def build_feature_report(annotations, vehicle_type_evidence=None):
                                              {'evidence': deepcopy(vehicle_type_evidence)},
                                              errors=[vehicle_type_evidence['reason']] if vehicle_type_evidence['state'] == 'unavailable' else [],
                                              limitations=[vehicle_type_evidence['score_notice'], *vehicle_type_evidence['limitations']])
+    plate_evidence = annotations.get('plate_evidence')
+    if plate_evidence is None:
+        features['plates'] = _feature('pending', 'The local plate check has not run for these boxes.',
+                                     {'evidence': None}, limitations=['Plate text cannot establish an offense or identify an owner.'])
+    else:
+        from .plate_models import validate_plate_evidence
+        validate_plate_evidence(plate_evidence, subjects)
+        features['plates'] = _feature(plate_evidence['state'], plate_evidence['reason'],
+                                     {'evidence': deepcopy(plate_evidence)},
+                                     errors=[plate_evidence['reason']] if plate_evidence['state'] == 'unavailable' else [],
+                                     limitations=[plate_evidence['score_notice'], *plate_evidence['limitations']])
     return {'version': 1, 'scope': 'selected_image', 'features': features,
             'summary': {'subject_count': len(subjects), 'vehicle_count': counts['total'],
                         'helmet_status_counts': helmet_status_counts,

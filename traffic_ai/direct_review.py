@@ -292,6 +292,32 @@ class DirectReview:
         from .vehicle_types import build_evidence, validate_vehicle_evidence
         return self._run_specialist(data, 'vehicle_type_evidence', build_evidence, validate_vehicle_evidence)
 
+    def run_plates(self, data):
+        from .plate_models import build_evidence, validate_plate_evidence
+        return self._run_specialist(data, 'plate_evidence', build_evidence, validate_plate_evidence)
+
+    def correct_plate(self, data):
+        """Keep raw OCR immutable and invalidate downstream review after a correction."""
+        from .plate_models import correct_plate_evidence
+        with self.lock:
+            folder, manifest, _ = self._bound(data)
+            self._check_source(manifest)
+            self._images(folder, manifest)
+            annotations = manifest.get('annotations')
+            if not annotations or annotations.get('plate_evidence') is None:
+                raise ValueError('Run the local plate check before correcting its reading.')
+            annotations['plate_evidence'] = correct_plate_evidence(
+                annotations['plate_evidence'], annotations['subjects'],
+                data.get('vehicle_id'), data.get('text'), plate_id=data.get('plate_id'))
+            manifest['local_evidence_revision'] = manifest.get('local_evidence_revision', 0) + 1
+            self._check_source(manifest)
+            _encoded(manifest)
+            write_json(self._path(folder, 'manifest.json'), manifest)
+            fingerprint = hashlib.sha256(_encoded(manifest)).hexdigest()
+            write_json(self._path(folder, 'state.json'), {'fingerprint': fingerprint, 'model_result': None,
+                                                         'review': {'decision': None, 'note': ''}})
+            return self.view(manifest['review_id'])
+
     def _run_specialist(self, data, field, builder, validator):
         with self.lock:
             folder, manifest, _ = self._bound(data)
@@ -352,6 +378,8 @@ class DirectReview:
             original = manifest['frames'][0]
             from .feature_report import build_feature_report
             feature_report = build_feature_report(annotations)
+            from .evidence_table import build_evidence_table
+            evidence_table = build_evidence_table(annotations, model_result, state['review'])
             return {'review_id': review_id, 'fingerprint': fingerprint,
                     'source': {key: manifest['source'][key] for key in ('name', 'kind')},
                     'frames': [{**{k: v for k, v in image.items() if k != 'data_url'}, 'position': 'selected',
@@ -360,6 +388,8 @@ class DirectReview:
                     'original_frame': {**original, 'url': self.files.url(self._path(folder, 'frame-0.jpg'))},
                     'annotations': annotations, 'local_evidence': local_evidence,
                     'vehicle_type_evidence': vehicle_type_evidence, 'feature_report': feature_report,
+                    'plate_evidence': annotations.get('plate_evidence') if annotations else None,
+                    'evidence_table': evidence_table,
                     'synthetic': manifest.get('synthetic'), 'model_result': model_result,
                     'review': state['review'], 'source_readiness': readiness,
                     'notice': annotations['notice'] if annotations else NOTICE}

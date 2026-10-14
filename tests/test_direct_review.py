@@ -376,3 +376,46 @@ def test_vehicle_specialist_survives_failed_subject_detector(prepared, monkeypat
     payload = json.loads((service.root/'direct-reviews'/view['review_id']/exported['filename']).read_text())
     assert payload['feature_report']['features']['vehicle_types']['state'] == 'complete'
     assert service.view(view['review_id'])['vehicle_type_evidence'] == result['vehicle_type_evidence']
+
+
+def test_plate_correction_preserves_model_reading_and_invalidates_review(prepared, monkeypatch):
+    from traffic_ai import plate_models
+    from traffic_ai.identified_vision import subjects_fingerprint
+    service, _, _, _, data, files = prepared
+    builder = plate_models.build_evidence
+    def synthetic(rgb, subjects, width, height, **kwargs):
+        return builder(rgb, subjects, width, height, **kwargs, detections=[
+            {'box': [10., 20., 30., 27.], 'detector_score': .8, 'ocr_score': .7, 'text': 'AB12CD3456'}])
+    monkeypatch.setattr(plate_models, 'build_evidence', synthetic)
+    view = service.annotate(data, subjects=[{'kind': 'car', 'bbox': [2, 2, 45, 31]}])
+    bound = lambda v: {key: v[key] for key in ('review_id', 'fingerprint')}
+    view = service.run_plates(bound(view))
+    original = view['plate_evidence']['subjects'][0]['candidates']
+    assert original[0]['text'] == 'AB12CD3456'
+    loaded = service.load(bound(view))
+    selection = {**bound(view), 'image_fingerprint': image_fingerprint(loaded['images']),
+                 'subjects_fingerprint': subjects_fingerprint(loaded['subjects']),
+                 'subject_results': [{'id': 'V1', 'role': 'vehicle', 'associated_vehicle_id': None,
+                     'status': 'no_visible_violation', 'observations': [{'kind': 'no_visible_concern',
+                     'evidence_ids': loaded['subjects'][0]['evidence_ids']}], 'suspected_issues': [],
+                     'uncertainties': ['model_may_misread']}]}
+    service.save_result(bound(view), selection)
+    service.decide({**bound(view), 'decision': 'accept'})
+    corrected = service.correct_plate({**bound(view), 'vehicle_id': 'V1', 'plate_id': original[0]['plate_id'], 'text': 'AB12CD3458'})
+    assert corrected['fingerprint'] != view['fingerprint']
+    assert corrected['model_result'] is None and corrected['review']['decision'] is None
+    assert corrected['plate_evidence']['subjects'][0]['candidates'] == original
+    assert corrected['evidence_table']['rows'][0]['plate']['text'] == 'AB12CD3458'
+    assert corrected['evidence_table']['summary']['suspected_issue_count'] == 0
+    with pytest.raises(ValueError, match='changed'):
+        service.correct_plate({**bound(view), 'vehicle_id': 'V1', 'plate_id': original[0]['plate_id'], 'text': 'AB12CD3458'})
+    exported = service.export(bound(corrected))
+    saved = json.loads(files.paths[exported['url']].read_text())
+    assert saved['plate_evidence'] == corrected['plate_evidence']
+    assert saved['evidence_table'] == corrected['evidence_table']
+    reopened = module.DirectReview(service.root, files).view(view['review_id'])
+    assert reopened['plate_evidence'] == corrected['plate_evidence']
+    rerun = service.run_plates(bound(corrected))
+    assert rerun['plate_evidence']['subjects'][0]['manual_correction'] is None
+    edited = service.annotate(bound(rerun), subjects=[{'id': 'V1', 'kind': 'car', 'bbox': [3, 2, 45, 31]}])
+    assert edited['plate_evidence'] is None

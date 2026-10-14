@@ -34,7 +34,7 @@ FEATURES = {"car": "car", "bus": "bus", "truck": "truck", "motorcycle": "motorcy
             "crosswalk": "crossing markings", "sidewalk": "sidewalk", "traffic_sign": "traffic sign",
             "traffic_light": "traffic light", "unknown": "unclassified features"}
 UNCERTAINTIES = {"small_details": "Small details were not resolved.", "occlusion": "Some features may be occluded.",
-                 "sign_text": "Sign text is unclear.", "visibility": "Visibility is limited.",
+                 "sign_text": "Sign text needs a closer, sharper view.", "visibility": "Visibility is limited.",
                  "insufficient_image": "The image did not support a useful object overview."}
 NOTE = ("Unverified local model feature categories. Movement, calibrated speed, signal applicability, "
         "object-to-marking relationships and traffic-rule decisions are not assessed.")
