@@ -17,7 +17,7 @@ function harness(respond=()=>undefined,saved=null){
   }
   function element(id){if(!elements.has(id))elements.set(id,node(id));return elements.get(id);}
   class Upload{constructor(){this.upload={};this.headers={};uploads.push(this);}open(method,url){this.method=method;this.url=url;}setRequestHeader(name,value){this.headers[name]=value;}send(body){this.body=body;}abort(){this.onabort();}finish(body={id:'media-1',source_revision:'revision-1',kind:'image'},status=200){this.status=status;this.responseText=JSON.stringify(body);this.onload();}}
-  const window={ViolationLens:common,XMLHttpRequest:Upload,document:{getElementById:element,querySelector(){return {content:'csrf-direct'};},createElement(){return node('link');},body:{append(){}}},localStorage:{getItem(){return saved;},setItem(key,id){savedIDs.push({key,id});}},fetch:async(path,options={})=>{requests.push({path,options});let data=await respond(path,options);if(data===undefined&&path==='/api/direct-vehicle-types')data={...(latestView||view()),vehicle_type_evidence:{version:1,state:'complete',reason:'Local subtype check complete.',subjects:[],unassigned_detections:[],candidate_counts:{total:0,by_type:{}},limitations:[]}};if(data===undefined&&path==='/api/direct-local-models')data={...(latestView||view()),local_evidence:{version:1,state:'complete',subjects:[],model:{name:'Helmet specialist'}}};if(data===undefined)data=path==='/api/config'?{evidence_origin:'http://127.0.0.1:5000',violation_readiness:{ready:false}}:path==='/api/violation-llm'?{available:true}:path==='/api/direct-library'?{reviews:[]}:view();if(data.review_id)latestView=data;return {ok:!data.error,json:async()=>data};}};
+  const window={ViolationLens:common,XMLHttpRequest:Upload,document:{getElementById:element,querySelector(){return {content:'csrf-direct'};},createElement(){return node('link');},body:{append(){}}},localStorage:{getItem(){return saved;},setItem(key,id){savedIDs.push({key,id});}},fetch:async(path,options={})=>{requests.push({path,options});let data=await respond(path,options);if(data===undefined&&path==='/api/direct-plates')data={...(latestView||view()),plate_evidence:{state:'complete',reason:'Local plate check complete.',subjects:[],source:{width:640,height:480}}};if(data===undefined&&path==='/api/direct-vehicle-types')data={...(latestView||view()),vehicle_type_evidence:{version:1,state:'complete',reason:'Local subtype check complete.',subjects:[],unassigned_detections:[],candidate_counts:{total:0,by_type:{}},limitations:[]}};if(data===undefined&&path==='/api/direct-local-models')data={...(latestView||view()),local_evidence:{version:1,state:'complete',subjects:[],model:{name:'Helmet specialist'}}};if(data===undefined)data=path==='/api/config'?{evidence_origin:'http://127.0.0.1:5000',violation_readiness:{ready:false}}:path==='/api/violation-llm'?{available:true}:path==='/api/direct-library'?{reviews:[]}:view();if(data.review_id)latestView=data;return {ok:!data.error,json:async()=>data};}};
   vm.runInContext(fs.readFileSync(require.resolve('../web/direct_review.js'),'utf8'),vm.createContext({window,URL}));
   const settle=()=>new Promise(resolve=>setImmediate(resolve));
   const click=async id=>{await element(id).listeners.click();await settle();};
@@ -49,7 +49,7 @@ test('direct sending requires every loaded exact image, consent, connection, and
   for(const args of [[current,new Set(['image-1']),true,true,false],[current,loaded,false,true,false],[current,loaded,true,false,false],[current,loaded,true,true,true],[{...current,model_result:assessment},loaded,true,true,false],[{...current,source_readiness:{available:false}},loaded,true,true,false]])assert.equal(direct.canSend(...args),false);
 });
 test('direct categories have readable headings without changing stored IDs or uncertainty',()=>{
-  const labels={person_on_two_wheeler:'Rider visible',bare_head_of_rider_visible:'Uncovered head visible',helmet_on_rider_visible:'Helmet visible on rider',crowded_rider_load_visible:'Crowded rider arrangement',rider_position_appears_unstable:'Possibly unstable rider position',cargo_appears_unsecured:'Possibly unsecured cargo',rider_association_unclear:'Rider association unclear',head_protection_unclear:'Head protection unclear',no_relevant_road_user_visible:'No relevant road user clearly visible',helmet_possible:'Possible missing helmet',unsafe_rider_load_possible:'Possible unsafe rider arrangement',other_visible_concern:'Possible cargo safety concern'};
+  const labels={person_on_two_wheeler:'Rider visible',bare_head_of_rider_visible:'Uncovered head visible',helmet_on_rider_visible:'Helmet visible on rider',crowded_rider_load_visible:'Crowded rider arrangement',rider_position_appears_unstable:'Possibly unstable rider position',cargo_appears_unsecured:'Possibly unsecured cargo',rider_association_unclear:'Unmatched rider',head_protection_unclear:'Head protection needs review',no_relevant_road_user_visible:'No relevant road user clearly visible',helmet_possible:'Possible missing helmet',unsafe_rider_load_possible:'Possible unsafe rider arrangement',other_visible_concern:'Possible cargo safety concern'};
   for(const [kind,label] of Object.entries(labels)){
     const issue=['helmet_possible','unsafe_rider_load_possible','other_visible_concern'].includes(kind);
     const result={...assessment,observations:[],suspected_issues:[],[issue?'suspected_issues':'observations']:[{kind,text:'Recorded canonical statement.',evidence_ids:['image-1'],uncertainty_text:['Model interpretation needs review.']}]};
@@ -102,7 +102,7 @@ test('corrections reset consent and require rebuilt exact previews',async()=>{
 });
 test('per-ID assessments preserve unclear versus no visible violation and escape canonical text',()=>{
   const result={model:'Astra',subject_results:[{id:'P1',status:'unclear',role:'unclear',observations:[{text:'<script>unsafe()</script>',evidence_ids:['image-1']}],suspected_issues:[]},{id:'V1',status:'no_visible_violation',role:'vehicle',observations:[],suspected_issues:[]}],limitations:['<b>One frame</b>']};
-  const html=direct.renderResult(result,[frame]);assert.match(html,/P1/);assert.match(html,/V1/);assert.match(html,/Unclear - evidence is insufficient/);assert.match(html,/No visible violation for this subject/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>|<b>One frame/);
+  const html=direct.renderResult(result,[frame]);assert.match(html,/P1/);assert.match(html,/V1/);assert.match(html,/Needs review/);assert.match(html,/No visible violation for this subject/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>|<b>One frame/);
 });
 test('detector failure preserves local manual editing without a model call',async()=>{
   const h=harness(path=>path==='/api/direct-annotate'?{error:'Local detector unavailable.'}:path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/Local detector unavailable/);assert.match(h.element('direct-message').textContent,/manually/);assert.equal(h.element('direct-add-box').disabled,false);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
@@ -176,7 +176,7 @@ test('primary local cards preserve raw scores and distinguish absent, weak and a
   subjects.push({id:'V1',kind:'motorcycle',origin:'detector',bbox:[0,0,50,50]},{id:'V2',kind:'motorcycle',origin:'manual',bbox:[50,0,100,50]});
   const evidence={state:'complete',model:{name:'Specialist <safe>'},subjects:[{id:'P1',helmet:{status:'helmet',detections:[{label:'helmet',model_score:0.83}],reason:'Visible head.'},vehicle_candidates:[{id:'V1',relationship:'geometric_unconfirmed'}]},{id:'P2',helmet:{status:'not_observed',detections:[],reason:'No matching head detection.'}},{id:'P3',helmet:{status:'low_confidence',detections:[{label:'no_helmet',model_score:0.31}]}},{id:'P4',helmet:{status:'unclear',detections:[{label:'helmet',model_score:0.61},{label:'no_helmet',model_score:0.59}]}},{id:'P5',helmet:{status:'unavailable',reason:'Crop unavailable.'}}],vehicle_counts:{truncated:true},limitations:['<script>bad()</script>']};
   const current=view({annotations:{subjects},local_evidence:evidence}),before=JSON.stringify(current),html=direct.renderLocalEvidence(current);
-  assert.match(html,/>0\.830</);assert.match(html,/title="Exact raw model score: 0\.83"/);assert.doesNotMatch(html,/83%/);assert.match(html,/raw model score/);assert.match(html,/Not observed/);assert.match(html,/Low confidence/);assert.match(html,/Ambiguous/);assert.match(html,/Unavailable/);assert.match(html,/Geometry only; rider association unconfirmed/);assert.match(html,/motorcycle<\/th><td>2<\/td><td>1<\/td><td>1/);assert.match(html,/not a unique vehicle count across the clip/);assert.match(html,/truncated to 12/);assert.doesNotMatch(html,/<script>|<safe>/);assert.equal(JSON.stringify(current),before);
+  assert.match(html,/>0\.830</);assert.match(html,/title="Exact raw model score: 0\.83"/);assert.doesNotMatch(html,/83%/);assert.match(html,/raw model score/);assert.match(html,/Not observed/);assert.match(html,/Low-confidence detection/);assert.match(html,/Conflicting predictions/);assert.match(html,/Unavailable/);assert.match(html,/Geometry only; rider association unconfirmed/);assert.match(html,/motorcycle<\/th><td>2<\/td><td>1<\/td><td>1/);assert.match(html,/not a unique vehicle count across the clip/);assert.match(html,/truncated to 12/);assert.doesNotMatch(html,/<script>|<safe>/);assert.equal(JSON.stringify(current),before);
 });
 
 test('Astra requires a completed or explicitly unavailable local check, including legacy reviews',()=>{
@@ -202,7 +202,7 @@ test('local endpoint failure offers retry and cannot silently unlock Astra',asyn
 
 test('local scores reopen without rerunning and remain separate from saved Astra interpretation',async()=>{
   const evidence={state:'complete',subjects:[{id:'P1',helmet:{status:'helmet',detections:[{label:'helmet',model_score:0.83}]}}]};
-  const h=harness(path=>path.startsWith('/api/direct-review')?view({local_evidence:evidence,model_result:assessment}):undefined,'review-1');await h.settle();assert.match(h.element('direct-local-output').innerHTML,/0\.83/);assert.match(h.element('direct-result').innerHTML,/Optional Astra interpretation/);assert.equal(h.requests.some(r=>r.path==='/api/direct-local-models'||r.path==='/api/direct-analyze'),false);
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({local_evidence:evidence,model_result:assessment}):undefined,'review-1');await h.settle();assert.match(h.element('direct-local-output').innerHTML,/0\.83/);assert.match(h.element('direct-result').innerHTML,/Optional LLM interpretation/);assert.equal(h.requests.some(r=>r.path==='/api/direct-local-models'||r.path==='/api/direct-analyze'),false);
   await h.click('direct-edit-boxes');await h.click('direct-add-box');assert.match(h.element('direct-local-output').innerHTML,/Boxes changed/);assert.equal(h.element('direct-result').hidden,true);await h.click('direct-cancel-box-edit');assert.match(h.element('direct-local-output').innerHTML,/0\.83/);assert.equal(h.element('direct-result').hidden,false);
 });
 
@@ -212,7 +212,7 @@ test('local evidence exports without requesting an Astra assessment',async()=>{
 
 test('legacy saved Astra reviews can explicitly run specialists and clear downstream results',async()=>{
   const h=harness(path=>path.startsWith('/api/direct-review')?view({local_evidence:null,model_result:assessment,review:{decision:'accept',note:'Old decision'}}):path==='/api/direct-local-models'?view({fingerprint:'local-refresh'}):undefined,'review-1');await h.settle();
-  assert.equal(h.element('direct-local-run').disabled,false);assert.match(h.element('direct-local-run').textContent,/clears Astra review/);assert.equal(h.element('direct-local-rerun-notice').hidden,false);assert.match(h.element('direct-local-output').innerHTML,/Run specialist models/);
+  assert.equal(h.element('direct-local-run').disabled,false);assert.match(h.element('direct-local-run').textContent,/clears LLM review/);assert.equal(h.element('direct-local-rerun-notice').hidden,false);assert.match(h.element('direct-local-output').innerHTML,/Run specialist models/);
   await h.click('direct-local-run');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-local-rerun-notice').hidden,true);h.loaded();assert.equal(h.element('direct-send').disabled,true);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 
@@ -262,7 +262,7 @@ test('outdated backend is explicit and preserves other feature successes without
 
 test('vehicle subtype rendering separates per-ID candidates from unmatched proposals and threshold counts',()=>{
   const evidence={state:'complete',reason:'Local check complete.',subjects:[{id:'V1',status:'low_confidence',candidates:[{label:'Three-wheeler',model_score:.31234567}]},{id:'V2',status:'unclear',candidates:[{label:'Sedan',model_score:.62},{label:'SUV',model_score:.61}]}],unassigned_detections:[{label:'Truck <unsafe>',model_score:.83,reason:'no_numbered_vehicle_match'}],candidate_counts:{total:3,by_type:{Sedan:1,SUV:1,Truck:1}},limitations:['Small objects can be missed.']};const before=JSON.stringify(evidence),html=direct.renderVehicleEvidence(view({vehicle_type_evidence:evidence}));
-  assert.match(html,/V1/);assert.match(html,/Low confidence/);assert.match(html,/Ambiguous/);assert.match(html,/>0\.312</);assert.match(html,/Exact raw model score: 0\.31234567/);assert.match(html,/Unmatched proposals/);assert.match(html,/No matching numbered vehicle box; association unconfirmed/);assert.match(html,/score at least 0\.5/);assert.match(html,/Lower-score candidates above are excluded/);assert.match(html,/not verified objects/);assert.doesNotMatch(html,/<unsafe>/);assert.equal(JSON.stringify(evidence),before);
+  assert.match(html,/V1/);assert.match(html,/Low-confidence detection/);assert.match(html,/Needs review/);assert.match(html,/>0\.312</);assert.match(html,/Exact raw model score: 0\.31234567/);assert.match(html,/Unmatched proposals/);assert.match(html,/No matching numbered vehicle box; association unconfirmed/);assert.match(html,/score at least 0\.5/);assert.match(html,/Lower-score candidates above are excluded/);assert.match(html,/not verified objects/);assert.doesNotMatch(html,/<unsafe>/);assert.equal(JSON.stringify(evidence),before);
   assert.doesNotMatch(direct.renderVehicleEvidence(view({vehicle_type_evidence:{state:'unavailable',reason:'Unavailable model.'}})),/proposal counts: 0/);
 });
 
@@ -298,7 +298,7 @@ test('automatic pipeline refreshes library only after all bound mutations finish
   let release,libraryCalls=0;
   const h=harness(path=>path==='/api/direct-library'?(++libraryCalls===1?{reviews:[]}:new Promise(resolve=>release=resolve)):path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();h.element('direct-rights').checked=true;
   const pending=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'serial.jpg'}]}});h.uploads[0].finish();await h.settle();const relevant=h.requests.filter(r=>r.path.startsWith('/api/direct-')&&r.path!=='/api/direct-review').map(r=>r.path);
-  assert.deepEqual(relevant,['/api/direct-library','/api/direct-prepare','/api/direct-annotate','/api/direct-local-models','/api/direct-vehicle-types','/api/direct-library']);assert.equal(libraryCalls,2);release({reviews:[]});await pending;
+  assert.deepEqual(relevant,['/api/direct-library','/api/direct-prepare','/api/direct-annotate','/api/direct-local-models','/api/direct-vehicle-types','/api/direct-plates','/api/direct-library']);assert.equal(libraryCalls,2);release({reviews:[]});await pending;
 });
 
 test('manual specialist mutation waits for a pending library refresh and never retries its POST',async()=>{
@@ -317,4 +317,63 @@ test('only the latest replacement starts after an active inference fails; no old
 test('restored reviews name their saved source without populating the file input or rerunning inference',async()=>{
   const h=harness(path=>path.startsWith('/api/direct-review')?view({source:{name:'indian_riders.png',kind:'image'}}):undefined,'review-1');await h.settle();
   assert.equal(h.element('direct-filename').textContent,'Saved review source: indian_riders.png. Choose a file to start a new review.');assert.equal(h.element('direct-file').files.length,0);assert.equal(h.uploads.length,0);assert.equal(h.requests.some(r=>r.options.method==='POST'),false);
+});
+
+
+test('final interpretation labels use LLM without exposing model branding or changing stored model ID',()=>{
+  const before=JSON.stringify(assessment),html=direct.renderResult(assessment,[frame]);
+  assert.match(html,/Optional LLM interpretation/);assert.doesNotMatch(html,/Astra|ChatGPT|gpt-6-astra/i);assert.equal(JSON.stringify(assessment),before);
+});
+test('plate checks are bound, independent and saved reopening never triggers OCR',async()=>{
+  const saved=view({plate_evidence:{state:'complete',reason:'Saved OCR.',source:{width:640,height:480},subjects:[{id:'P1',status:'not_applicable',candidates:[]}]}});
+  const h=harness(path=>path.startsWith('/api/direct-review')?saved:undefined,'review-1');await h.settle();
+  assert.equal(h.element('direct-feature-plates-status').textContent,'Complete');assert.equal(h.requests.some(r=>r.path==='/api/direct-plates'),false);
+  await h.click('direct-plate-run');const request=h.requests.find(r=>r.path==='/api/direct-plates');assert.deepEqual(JSON.parse(request.options.body),{review_id:'review-1',fingerprint:'fingerprint-1'});assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+});
+test('plate failure retains other evidence and gives an independent retry',async()=>{
+  const h=harness(path=>path==='/api/direct-plates'?{error:'OCR unavailable'}:undefined,'review-1');await h.settle();await h.click('direct-plate-run');
+  assert.equal(h.element('direct-feature-plates-status').textContent,'Failed');assert.match(h.element('direct-feature-plates-detail').textContent,/Run plate check/);assert.equal(h.element('direct-feature-helmet-status').textContent,'Complete');assert.equal(h.element('direct-plate-run').disabled,false);
+});
+test('needs-input counts remain waiting when source localization is unavailable',async()=>{
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:{subjects:[],detector:{state:'unavailable'}},feature_report:{features:{vehicle_counts:{state:'needs_input',summary:'Add subject boxes before counting.'}}}}):undefined,'review-1');await h.settle();
+  assert.equal(h.element('direct-feature-vehicles-status').textContent,'Waiting');assert.match(h.element('direct-feature-vehicles-detail').textContent,/Add subject boxes/);
+});
+
+test('direct sharing consent explicitly names OpenAI and ChatGPT while ordinary review labels use LLM',()=>{
+ const html=fs.readFileSync(require.resolve('../web/violation_lens.html'),'utf8');
+ assert.match(html,/send these images, their subject identifiers, and local model evidence to OpenAI for LLM review through my ChatGPT plan/);
+ assert.match(html,/Ask LLM to explain/);assert.doesNotMatch(html,/Astra/);
+ assert.doesNotMatch(direct.renderResult(assessment,[frame]),/ChatGPT|Astra/i);
+});
+
+test('unassigned plate proposals remain visible with uncertain OCR, reason, bounds and raw scores',()=>{
+ const evidence={state:'complete',source:{width:640,height:480},subjects:[],unassigned_detections:[{plate_id:'plate-1',box:[20,30,80,50],detector_score:0.687,ocr_score:0.027,text:'DED',reason:'ambiguous_vehicle_overlap'},{plate_id:'plate-2',box:[90,100,120,130],detector_score:0.440,ocr_score:0.045,text:'<E>',reason:'no_numbered_vehicle_match'}]};
+ const html=direct.renderPlates(view({plate_evidence:evidence}));
+ assert.match(html,/Unassigned plate proposals/);assert.match(html,/Ambiguous vehicle overlap/);assert.match(html,/No numbered vehicle match/);assert.match(html,/OCR text is unverified/);assert.match(html,/0.687/);assert.match(html,/0.027/);assert.match(html,/20, 30, 80, 50/);assert.match(html,/Unassigned plate<\/text>/);assert.match(html,/&lt;E&gt;/);assert.doesNotMatch(html,/data-plate-save|Apparent vehicle/);
+});
+
+test('actionable review labels preserve saved enums and detailed uncertainty',()=>{
+ const saved={subject_results:[{subject_id:'P1',status:'unclear',role:'person_unclear',observations:[{text:'The head is obscured; protection is unclear.',evidence_ids:['image-1']}],uncertainty_text:['Not enough evidence for rider assignment.']}],limitations:[]};
+ const before=JSON.stringify(saved),html=direct.renderResult(saved,[frame]);
+ assert.doesNotMatch(html,/unclear|not enough evidence/i);assert.match(html,/head is obscured/);assert.match(html,/Needs review|needs review/);assert.equal(JSON.stringify(saved),before);
+ assert.equal(common.reviewText('rider_association_unclear'),'rider_association_unclear');
+});
+test('every feature documents its actual model and inference limits',()=>{
+ const html=fs.readFileSync(require.resolve('../web/violation_lens.html'),'utf8');
+ assert.equal((html.match(/Model used \/ How it works/g)||[]).length,5);
+ for(const model of ['yolo11s.pt','iam-tsr/yolov8n-helmet-detection','iisc-aim/UVH-26','morsetechlab/yolov11-license-plate-detection','EasyOCR 1.7.2'])assert.ok(html.includes(model));
+ assert.match(html,/No additional model/);assert.match(html,/training\/test contamination/);
+});
+
+test('evidence table rounds displayed scores while retaining exact values and separate observations',()=>{
+ const {renderEvidenceTable}=require('../web/evidence_table.js');
+ const record={evidence_table:{summary:{suspected_issue_count:0},rows:[{subject_id:'V1',kind:'car',assessment:'observed',observations:['Vehicle visible.'],suspected_issues:[],raw_model_scores:[{source:'vehicle',label:'car',model_score:0.687123456789}],evidence_ids:[],review_status:'pending'}]}};
+ const before=JSON.stringify(record),html=renderEvidenceTable(record);
+ assert.match(html,/>0\.687<\/code>/);assert.match(html,/title="Exact raw model score: 0\.687123456789"/);assert.match(html,/0 distinct suspected issues/);assert.match(html,/No supported suspicion listed/);assert.match(html,/<summary>Observations<\/summary>/);assert.match(html,/Vehicle visible/);assert.equal(JSON.stringify(record),before);
+});
+
+test('ordinary connected summary and usage label use LLM while sign-in keeps provider disclosure',()=>{
+ const html=fs.readFileSync(require.resolve('../web/violation_lens.html'),'utf8'),script=fs.readFileSync(require.resolve('../web/violation_lens.js'),'utf8');
+ assert.match(html,/Manage LLM usage/);assert.doesNotMatch(html,/Manage ChatGPT usage/);assert.match(html,/https:\/\/chatgpt.com\/settings\/usage/);assert.match(html,/Approve and open ChatGPT sign-in/);
+ assert.match(script,/LLM connection ready\. Account eligibility is checked when requesting a model\./);
 });

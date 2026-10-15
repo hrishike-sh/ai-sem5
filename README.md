@@ -1,6 +1,6 @@
-# ViolationLens · AI Sem 5
+# ViolationLens - AI Sem 5
 
-Local traffic evidence review. Upload a permitted image or select a video frame, number people and vehicles locally, preview their boxes and crops, and ask Astra for findings tied to each subject ID using your ChatGPT plan. Full-clip rule analysis remains optional.
+Local traffic evidence review. Upload a permitted image or select a video frame, number people and vehicles locally, preview their boxes and crops, and ask the LLM for findings tied to each subject ID using your ChatGPT plan. Full-clip rule analysis remains optional.
 
 ## Run
 
@@ -15,13 +15,13 @@ The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It
 
 ## Review workflow
 
-Drop one JPG or PNG, or choose it with the file picker. After you acknowledge permission, the same image is uploaded once and automatically processed by the available local features: subject localization, helmet evidence, vehicle-class counts, and vehicle subtype proposals. Each section shows its own progress, results or failure; a combined report includes successful evidence and pending or unavailable checks. For video, select a timestamp and choose **Upload and preview**. No hosted request runs automatically.
+Drop one JPG or PNG, or choose it with the file picker. After you acknowledge permission, the same image is uploaded once and automatically processed by the available local features: subject localization, helmet evidence, vehicle-class counts, vehicle subtype proposals, and number plate candidates. Each section shows its own progress, results or failure; a combined report includes successful evidence and pending or unavailable checks. For video, select a timestamp and choose **Upload and preview**. No hosted request runs automatically.
 
 Inspect the numbered boxes: P IDs represent people and V IDs represent vehicles, not verified riders or identities. Correct missing or wrong boxes by drawing, editing coordinates/type, or deleting them. Manual boxes also work when the subject detector is unavailable; the independent vehicle subtype specialist can still inspect the image. At most twelve subjects are numbered; a truncated detection is visibly reported. Replacing the image clears the visible results and ignores stale responses from the prior image.
 
-Inspect the exact annotated context and ID-linked crops, approve sending them to OpenAI, then choose **Send numbered subjects to Astra**. One context and up to twelve padded crops are sent; each JPEG is bounded to 768 pixels per edge. Crops use the bound original-resolution frame. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Source paths and reviewer notes are excluded. These are within-image IDs, not identities or cross-frame tracking.
+Inspect the exact annotated context and ID-linked crops, approve sending them to OpenAI, then choose **Ask LLM to explain (optional)**. One context and up to twelve padded crops are sent; each JPEG is bounded to 768 pixels per edge. Crops use the bound original-resolution frame. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Source paths and reviewer notes are excluded. These are within-image IDs, not identities or cross-frame tracking.
 
-Astra must return every submitted ID once, distinguish riders from pedestrians, and link each apparent rider to a submitted two-wheeler. Each finding cites that subject's own crop and shared context. Possible missing helmet requires a visible uncovered head on an apparent motorcycle rider; an obscured or ambiguous head is unclear. Possible triple riding requires three distinct visible people associated with the same motorcycle, with consistent group references. Zebra occupancy is only an observation. Speed, wrong-way movement, red-light crossing, obstruction and parking legality cannot be established by this single-frame flow. There are no legal citations, fines or determinations of guilt.
+The LLM must return every submitted ID once, distinguish riders from pedestrians, and link each apparent rider to a submitted two-wheeler. Each finding cites that subject's own crop and shared context. Possible missing helmet requires a visible uncovered head on an apparent motorcycle rider; an obscured or ambiguous head is unclear. Possible triple riding requires three distinct visible people associated with the same motorcycle, with consistent group references. Zebra occupancy is only an observation. Speed, wrong-way movement, red-light crossing, obstruction and parking legality cannot be established by this single-frame flow. There are no legal citations, fines or determinations of guilt.
 
 Review the separate per-ID observations, suspected issues and uncertainty, then save Accept or Reject with a note and export JSON. A status of no visible violation means no supported visible concern was selected, not verified compliance. **Edit boxes** lets you correct a saved assessment; saving changes clears its model result and reviewer decision and requires a fresh preview and consent. Reopening unchanged saved results sends no new model request. Older unnumbered assessments remain readable, but new requests require subject boxes.
 
@@ -35,7 +35,7 @@ For a short walkthrough, see the [demo guide](docs/DEMO.md). Optional ChatGPT ex
 
 For a repeatable demonstration, expand **Try a synthetic rule demo** and choose opposing motion, following motion, or unknown direction. The app generates a labeled three-second rectangle animation and evaluates its known coordinates with the existing geometric rule engine. This works without detector weights or ChatGPT. It demonstrates configured-rule checks, evidence frames, saved human decisions and export; it is not learned detection or a real-traffic benchmark.
 
-The optional deterministic pipeline prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Its automatic triple-riding rule remains deferred; the numbered Astra review offers a separate fallible visual assessment. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
+The optional deterministic pipeline prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Its automatic triple-riding rule remains deferred; the numbered LLM review offers a separate fallible visual assessment. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
 
 The advanced detection and overview interface remains available at `/studio`. Saved results and uploads stay in this repository's local runtime directories.
 
@@ -45,7 +45,7 @@ After boxes are numbered or corrected, the app runs the pinned `iam-tsr/yolov8n-
 
 The checkpoint was trained at image size 224; this app uses full-context CPU inference at size 960 to retain small heads. Local checks showed strong scale sensitivity and duplicate predictions. Duplicates do not create additional people or vehicle counts. The accompanying **vehicle breakdown** counts numbered motorcycle, bicycle, car, bus and truck boxes in this image, distinguishing detector proposals from manual corrections and displaying any twelve-subject truncation. It is not a unique traffic-volume measurement.
 
-Astra receives the exact previews plus these bound local predictions. It cannot replace scores or turn absent/uncertain evidence into a missing-helmet issue. A suspected missing-helmet observation additionally needs a supported local no-helmet prediction and a visible rider association to the same motorcycle. Local evidence can be exported without Astra. Correcting boxes clears both local evidence and the previous Astra assessment; the specialist reruns before another send.
+The LLM receives the exact previews plus these bound local predictions. It cannot replace scores or turn absent/uncertain evidence into a missing-helmet issue. A suspected missing-helmet observation additionally needs a supported local no-helmet prediction and a visible rider association to the same motorcycle. Local evidence can be exported without an LLM request. Correcting boxes clears both local evidence and the previous LLM assessment; the specialist reruns before another send.
 
 Two real local samples were inspected without hosted transmission. The flyover frame contained a raw no-helmet false candidate on a billboard and a helmet candidate on a rider. The supplied rider image produced overlapping head detections and a low-score conflicting class. These are useful failure cases, not a labeled accuracy benchmark. The existing `yahyagul/traffic-sign-yolov8` checkpoint returned no candidates on the two samples or a synthetic sign probe, so sign/signal recognition was not added to the primary workflow. No plate detector or OCR quality was established.
 
@@ -54,6 +54,29 @@ Model cards label the [helmet checkpoint](https://huggingface.co/iam-tsr/yolov8n
 The additional [IISc UVH-26](https://huggingface.co/iisc-aim/UVH-26) YOLOv11-S specialist proposes fourteen vehicle types: Hatchback, Sedan, SUV, MUV, Bus, Truck, Three-wheeler, Two-wheeler, LCV, Mini-bus, tempo-traveller, bicycle, Van and Others. It uses the original selected image at its training size of 640 pixels. Raw scores below 0.50 remain low-confidence evidence; qualifying proposal counts are separate from numbered-box counts. Subtypes and geometric matches remain candidates, and unmatched or conflicting predictions are visible. The supplied flyover frame produced seven qualifying proposals; the rider image produced two, missing other visible vehicles. A false Three-wheeler proposal at 0.497 was below the threshold. At 960 pixels the model produced worse subtype confusions in these checks, so that setting was not adopted. These two samples establish feasibility, not accuracy.
 
 The optional UVH weight file is `models/uvh26-yolo11s-4a224127.pt`, or the ignored `ai-runtime.json` `models.vehicle_types` path. It must match revision `4a22412775adb6f97f22735647afee976b4638a0`, SHA-256 `12dbeb8f6fa207d19446fa652fc4313359fbec267027c8c01641004dcf1d0150` (57,142,241 bytes). The [official file](https://huggingface.co/iisc-aim/UVH-26/blob/4a22412775adb6f97f22735647afee976b4638a0/weights/YOLOv11-S/UVH-26-MV-YOLOv11-S.pt) hash was checked before local use. The repository card declares Apache 2.0 and explicitly retains upstream Ultralytics AGPLv3 obligations. See the authors' [technical report](https://arxiv.org/abs/2511.02563). No weights are redistributed or downloaded automatically by this feature.
+
+## Local number plate evidence
+
+The fifth feature uses [Morse Tech Lab's YOLO11n plate detector](https://huggingface.co/morsetechlab/yolov11-license-plate-detection) and [EasyOCR English recognition](https://github.com/JaidedAI/EasyOCR). Detection and OCR run locally. Boxes are associated only with a uniquely containing numbered vehicle; overlapping or unmatched candidates stay unassigned. Small, unreadable and low-confidence readings remain uncertain. A plate cannot establish an offense, registration validity, an owner's identity, or a vehicle's history. There is no database lookup.
+
+The evidence table joins subject IDs, apparent rider associations, candidate plates, observations, supported suspicions, raw model scores and reviewer status. Shared rider-group concerns appear once on the motorcycle row. Missing helmet and three-rider suspicions still need the existing visible-evidence checks; zebra occupancy is an observation, and speed, signal crossing and wrong-way movement need additional temporal/context evidence. A local model score alone does not create a violation.
+
+In **Number plate evidence**, inspect the source boxes and raw OCR. A manual transcription is attached to one detected plate and vehicle, retains the original OCR, and clears any old LLM assessment and reviewer decision. Corrections, original predictions and the combined table persist in JSON exports and saved reviews. OCR strings and manual transcriptions are not added to the LLM text payload; plate pixels may remain visible in images you explicitly approve sending to OpenAI.
+
+Optional recognition dependencies can be installed beside the base environment without replacing its PyTorch or OpenCV packages:
+
+```powershell
+uv pip install --python .\.ai-runtime\venv\Scripts\python.exe --target .\.ai-runtime\site-packages --no-deps -r requirements-ocr.txt
+```
+
+Use the configured dedicated runtime paths if they differ from the defaults. Supply these files under that runtime's `models/plates/` directory; the app checks their hashes before loading and never downloads missing plate weights automatically:
+
+| File | Official source | SHA-256 |
+| --- | --- | --- |
+| `detector.pt` | [Pinned YOLO11n checkpoint](https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/251a30d7daedca065f56e04b0af04052c907c68f/license-plate-finetune-v1n.pt) | `0aec75976c56eb6f26dfb274c430620ec65137915ff1ae47c3a48c7af8afb7b2` |
+| `english_g2.pth` | Extract this exact file from [EasyOCR's official archive](https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/english_g2.zip) | `e2272681d9d67a04e2dff396b6e95077bc19001f8f6d3593c307b9852e1c29e8` |
+
+The detector is AGPL-3.0; EasyOCR is Apache-2.0. The detector publisher warns of training/test contamination, so its published metrics are not a reliable field estimate. No weights are distributed here. On the two supplied local samples, detected plate crops produced low-confidence, incorrect or incomplete OCR; neither became an accepted reading. A clearly labeled, high-resolution synthetic text fixture was transcribed exactly but still scored below the conservative 0.80 threshold. This verifies execution and uncertainty handling, not real-world recognition accuracy.
 
 ## Optional ChatGPT plan explanation
 

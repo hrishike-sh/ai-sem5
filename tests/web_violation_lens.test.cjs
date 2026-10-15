@@ -379,7 +379,7 @@ test('saved image explanations reopen from their recorded descriptors without a 
   },'saved');
   await harness.settle();
   const html=harness.element('cards').innerHTML;
-  assert.match(html,/Saved explanation/);assert.match(html,/No new ChatGPT request was sent/);
+  assert.match(html,/Saved explanation/);assert.match(html,/No new LLM request was sent/);
   assert.match(html,/head is obscured/);assert.match(html,/Frame saved-frame/);assert.match(html,/2.50 s/);
   assert.match(html,/data-action="prepare" disabled/);
   assert.ok(harness.requests.every(request=>!request.options.method));
