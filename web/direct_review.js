@@ -61,7 +61,7 @@
   function localReady(view){return ['complete','unavailable'].includes(localEvidence(view)?.state);}
   function renderLocalEvidence(view){
     const evidence=localEvidence(view),subjects=list(view?.annotations?.subjects);
-    if(!evidence)return '<p>Run specialist models to check helmets on the current numbered subjects locally.</p>';
+    if(!evidence)return '<p>Run helmet check to check helmets on the current numbered subjects locally.</p>';
     const statuses={helmet:'Helmet detected',no_helmet:'No helmet detected',unclear:'Needs review',low_confidence:'Low-confidence detection',not_observed:'Not observed',not_applicable:'Not applicable',unavailable:'Unavailable'};
     const cards=subjects.filter(s=>s.kind==='person').map(subject=>{
       const item=list(evidence.subjects).find(s=>s.id===subject.id),helmet=item?.helmet;
@@ -70,7 +70,7 @@
     }).join('');
     const vehicles=subjects.filter(s=>['motorcycle','bicycle','car','bus','truck'].includes(s.kind));
     const rows=['motorcycle','bicycle','car','bus','truck'].map(kind=>{const group=vehicles.filter(s=>s.kind===kind);return `<tr><th scope="row">${esc(kind)}</th><td>${group.length}</td><td>${group.filter(s=>s.origin==='detector').length}</td><td>${group.filter(s=>s.origin==='manual').length}</td></tr>`;}).join('');
-    return `<p class="hint">${esc(evidence.model?.name||'Local helmet specialist')} - ${evidence.state==='complete'?'Check complete':'Unavailable'}. ${displayText(evidence.reason||'')}</p><p>Scores are raw model confidence, not accuracy or proof of a violation. Missing detections never mean "no helmet."</p><div class="local-subjects">${cards||'<p>No numbered person boxes in this image.</p>'}</div><h4>Vehicles in current numbered boxes: ${vehicles.length}</h4><p class="hint">Single selected image only, not a unique vehicle count across the clip. Manual and detector boxes may miss or duplicate vehicles.</p><div class="box-table-wrap"><table class="box-table"><thead><tr><th>Class</th><th>Count</th><th>Detector boxes</th><th>Manual boxes</th></tr></thead><tbody>${rows}</tbody></table></div>${view.annotations?.detector?.truncated||evidence.vehicle_counts?.truncated?'<p class="missing">Proposals were truncated to 12 boxes. Counts cover only retained, current boxes.</p>':''}${list(evidence.limitations).length?`<ul class="hint">${evidence.limitations.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`:''}`;
+    return `<p class="hint">Helmet check - ${evidence.state==='complete'?'Check complete':'Unavailable'}. ${displayText(evidence.reason||'')}</p><p>Scores are raw model confidence, not accuracy or proof of a violation. Missing detections never mean "no helmet."</p><div class="local-subjects">${cards||'<p>No numbered person boxes in this image.</p>'}</div><h4>Vehicles in current numbered boxes: ${vehicles.length}</h4><p class="hint">Single selected image only, not a unique vehicle count across the clip. Manual and detector boxes may miss or duplicate vehicles.</p><div class="box-table-wrap"><table class="box-table"><thead><tr><th>Class</th><th>Count</th><th>Detector boxes</th><th>Manual boxes</th></tr></thead><tbody>${rows}</tbody></table></div>${view.annotations?.detector?.truncated||evidence.vehicle_counts?.truncated?'<p class="missing">Proposals were truncated to 12 boxes. Counts cover only retained, current boxes.</p>':''}${list(evidence.limitations).length?`<ul class="hint">${evidence.limitations.map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`:''}`;
   }
   function vehicleEvidence(view){return view?.vehicle_type_evidence||view?.annotations?.vehicle_type_evidence;}
   function renderVehicleEvidence(view){
@@ -80,7 +80,7 @@
     const statuses={candidate:'Subtype candidate',low_confidence:'Low-confidence detection',unclear:'Needs review',not_observed:'Not observed',unavailable:'Unavailable'};
     const entries=items=>list(items).map(d=>`<li>${esc(d.label)} ${score(d)} <small>raw model score</small>${d.reason?`<p class="hint">${d.reason==='ambiguous_vehicle_overlap'?'Overlaps multiple numbered vehicle boxes; association unconfirmed.':'No matching numbered vehicle box; association unconfirmed.'}</p>`:''}</li>`).join('');
     const cards=list(evidence.subjects).filter(row=>row.status!=='not_applicable').map(row=>`<section class="local-subject"><h4>${esc(row.id)}</h4><p class="local-status">${esc(statuses[row.status]||'Unavailable')}</p>${list(row.candidates).length?`<ul>${entries(row.candidates)}</ul>`:'<p>No usable subtype candidate. This does not establish that no vehicle is present.</p>'}</section>`).join('');
-    return `<p class="hint">${esc(evidence.model?.name||'Local vehicle subtype specialist')} - ${displayText(evidence.reason)}</p><p>Subtype labels and ID matches are candidates requiring visual review. Raw scores are not calibrated accuracy.</p><div class="local-subjects">${cards}</div><h4>Unmatched proposals</h4>${list(evidence.unassigned_detections).length?`<ul>${entries(evidence.unassigned_detections)}</ul>`:'<p>No unmatched proposals recorded.</p>'}<h4>Subtype proposal counts: ${esc(evidence.candidate_counts?.total??0)}</h4><p class="hint">Current image detector proposals with score at least 0.5; not verified objects, manual box counts, or unique video traffic. Lower-score candidates above are excluded from this count.</p><ul class="feature-values">${Object.entries(evidence.candidate_counts?.by_type||{}).map(([label,count])=>`<li><span>${esc(label)}</span><strong>${esc(count)}</strong></li>`).join('')}</ul><ul class="hint">${list(evidence.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
+    return `<p class="hint">Vehicle subtype check - ${displayText(evidence.reason)}</p><p>Subtype labels and ID matches are candidates requiring visual review. Raw scores are not calibrated accuracy.</p><div class="local-subjects">${cards}</div><h4>Unmatched proposals</h4>${list(evidence.unassigned_detections).length?`<ul>${entries(evidence.unassigned_detections)}</ul>`:'<p>No unmatched proposals recorded.</p>'}<h4>Subtype proposal counts: ${esc(evidence.candidate_counts?.total??0)}</h4><p class="hint">Current image detector proposals with score at least 0.5; not verified objects, manual box counts, or unique video traffic. Lower-score candidates above are excluded from this count.</p><ul class="feature-values">${Object.entries(evidence.candidate_counts?.by_type||{}).map(([label,count])=>`<li><span>${esc(label)}</span><strong>${esc(count)}</strong></li>`).join('')}</ul><ul class="hint">${list(evidence.limitations).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`;
   }
   function canSend(view,loaded,consent,available,busy){return !!view&&localReady(view)&&!view.model_result&&list(view.annotations?.subjects).length>0&&view.source_readiness?.available!==false&&!busy&&available===true&&consent===true&&list(view.frames).length>0&&view.frames.every(f=>f.available!==false&&f.url&&loaded.has(f.id));}
   const helpers={sourceKind,selectedTime,validateView,renderPreview,renderResult,canSend,localEvidence,localReady,renderLocalEvidence,vehicleEvidence,renderVehicleEvidence,renderPlates};
@@ -128,31 +128,30 @@
     const report=view.feature_report;if(report?.features){const mapping={localization:'localization',helmet:'helmet',vehicles:'vehicle_counts',types:'vehicle_types',plates:'plates'};for(const [key,source] of Object.entries(mapping)){const saved=report.features[source];if(saved&&['unavailable','pending','needs_input','not_applicable','failed'].includes(saved.state))state.features[key]={status:({pending:'waiting',needs_input:'waiting',not_applicable:'unsupported',failed:'error'})[saved.state]||saved.state,detail:saved.summary||list(saved.errors).join(' ')};}}
     renderFeatures();
   }
-  function startQueuedImage(){if(state.autoQueued&&!state.autoStarted&&!state.busy&&!state.libraryBusy&&state.config&&$('direct-rights').checked){state.autoStarted=true;state.autoQueued=false;return prepare();}}
+  function startQueuedImage(){if(state.autoQueued&&!state.autoStarted&&!state.busy&&!state.libraryBusy&&state.config){state.autoStarted=true;state.autoQueued=false;return prepare();}}
   function selectSource(file){
     if(file&&file===state.selectedFile)return;
     const previousUpload=state.upload;state.generation++;state.upload=null;state.busy=false;previousUpload?.abort();
     state.selectedFile=file||null;state.media=null;state.file=null;state.backendUnsupported=false;state.vehicleBackendUnsupported=false;state.autoStarted=false;clearView();
     const kind=sourceKind(file?.name);state.autoQueued=kind==='image';state.features={};renderFeatures();
     $('direct-upload-progress').hidden=true;$('direct-filename').textContent=file?.name||'No source selected.';$('direct-time-wrap').hidden=kind!=='video';$('direct-time').value='0';
-    message(kind==='image'?($('direct-rights').checked?'Starting all local checks for this image.':'Image queued. Confirm permission below to start all local checks.'):kind==='video'?'Choose a timestamp, confirm permission, then prepare this video frame.':'Choose a JPG, PNG, MP4, MOV or AVI file.',!kind);actions();return startQueuedImage();
+    message(kind==='image'?'Starting all local checks for this image.':kind==='video'?'Choose a timestamp, then prepare this video frame.':'Choose a JPG, PNG, MP4, MOV or AVI file.',!kind);actions();return startQueuedImage();
   }
   function actions(){
     const file=state.selectedFile||$('direct-file').files?.[0],kind=sourceKind(file?.name),view=state.view;
-    $('direct-prepare').disabled=state.busy||!state.config||!kind||!$('direct-rights').checked;
+    $('direct-prepare').disabled=state.busy||!state.config||!kind;
     $('direct-prepare').textContent=state.media&&file===state.file?'Prepare selected frame':'Upload and preview';
-    for(const id of ['direct-time','direct-rights','direct-consent','direct-note'])$(id).disabled=state.busy;
+    for(const id of ['direct-time','direct-note'])$(id).disabled=state.busy;
     $('direct-cancel').hidden=!state.upload;$('direct-library-refresh').disabled=state.busy||state.libraryBusy;
     $('direct-plate-run').disabled=state.busy||state.dirty||!view?.annotations||view.source_readiness?.available===false;
     for(const input of $('direct-evidence-table').querySelectorAll('input,button'))input.disabled=state.busy||state.dirty||view?.source_readiness?.available===false;
     $('direct-local-run').disabled=state.busy||state.dirty||state.backendUnsupported||!view?.annotations||view.source_readiness?.available===false;
-    $('direct-local-run').textContent=view?.model_result?'Run specialist models (clears LLM review)':'Run specialist models';
+    $('direct-local-run').textContent=view?.model_result?'Run helmet check (clears LLM review)':'Run helmet check';
     $('direct-vehicle-run').disabled=state.busy||state.dirty||state.vehicleBackendUnsupported||!view?.annotations||view.source_readiness?.available===false;
-    $('direct-vehicle-run').textContent=view?.model_result?'Run vehicle subtypes (clears LLM review)':'Run vehicle subtype model';
+    $('direct-vehicle-run').textContent=view?.model_result?'Run subtype check (clears LLM review)':'Run subtype check';
     $('direct-vehicle-rerun-notice').hidden=!view?.model_result;
     $('direct-local-rerun-notice').hidden=!view?.model_result;
-    $('direct-consent').disabled=state.busy||state.dirty||!localReady(view);
-    $('direct-send').disabled=state.dirty||!canSend(view,state.loaded,$('direct-consent').checked,state.available,state.busy);
+    $('direct-send').disabled=state.dirty||!canSend(view,state.loaded,true,state.available,state.busy);
     const editingDisabled=state.busy||!view||(!!view.model_result&&!state.editingResult)||view.source_readiness?.available===false;
     $('direct-annotate').disabled=editingDisabled||!!view?.annotations;
     $('direct-save-boxes').disabled=editingDisabled||!state.dirty;
@@ -160,7 +159,6 @@
     $('direct-new-kind').disabled=editingDisabled;
     for(const input of $('direct-boxes').querySelectorAll('input,select,button'))input.disabled=editingDisabled;
     $('direct-send').hidden=!!view?.model_result;
-    $('direct-consent').closest('label').hidden=!!view?.model_result;
     for(const action of ['accept','reject','reset'])$('direct-'+action).disabled=state.busy||state.dirty||!view?.model_result;
     $('direct-export').hidden=!view;$('direct-export').disabled=state.busy||state.dirty||!view;
     $('direct-edit-boxes').hidden=!view?.model_result||state.editingResult;
@@ -169,7 +167,7 @@
     $('direct-cancel-box-edit').disabled=state.busy;
     for(const button of $('direct-library').querySelectorAll('[data-direct-open]'))button.disabled=state.busy;
   }
-  function clearView(){$('direct-drop-preview').hidden=true;$('direct-drop-preview').src='';state.view=null;state.drag=null;state.dirty=false;state.editingResult=false;state.loaded.clear();$('direct-consent').checked=false;for(const id of ['direct-evidence','direct-result','direct-decision','direct-local','direct-report','direct-vehicle-evidence','direct-plate-evidence'])$(id).hidden=true;}
+  function clearView(){$('direct-drop-preview').hidden=true;$('direct-drop-preview').src='';state.view=null;state.drag=null;state.dirty=false;state.editingResult=false;state.loaded.clear();for(const id of ['direct-evidence','direct-result','direct-decision','direct-local','direct-report','direct-vehicle-evidence','direct-plate-evidence'])$(id).hidden=true;}
   function remember(id){try{root.localStorage.setItem(storageKey,id);}catch{message('Review saved on the server. This browser cannot remember it; reopen it from saved image reviews.');}}
   const subjectKinds=['person','motorcycle','bicycle','car','bus','truck'];
   function drawEditor(redrawTable=true){
@@ -178,17 +176,17 @@
     const width=state.view?.annotations?.image_width||original?.width,height=state.view?.annotations?.image_height||original?.height;
     $('direct-box-overlay').innerHTML=width&&height?state.draft.map(s=>`<span class="subject-box" style="left:${100*s.bbox[0]/width}%;top:${100*s.bbox[1]/height}%;width:${100*(s.bbox[2]-s.bbox[0])/width}%;height:${100*(s.bbox[3]-s.bbox[1])/height}%"><b>${esc(s.id||'New')}</b></span>`).join(''):'';
   }
-  function edited(redrawTable=true){state.dirty=true;for(const key of Object.keys(featureNames))feature(key,'stale','Boxes changed. Save corrections to rebuild the combined report.');$('direct-local-output').innerHTML='<p>Boxes changed. Save corrections to rerun the local checks.</p>';$('direct-result').hidden=true;$('direct-vehicle-output').innerHTML='<p>Boxes changed. Save corrections to rerun subtype checks.</p>';$('direct-consent').checked=false;drawEditor(redrawTable);$('direct-preview-status').textContent='Boxes changed. Save corrections to rebuild the exact context and crop previews before sending.';actions();}
+  function edited(redrawTable=true){state.dirty=true;for(const key of Object.keys(featureNames))feature(key,'stale','Boxes changed. Save corrections to rebuild the combined report.');$('direct-local-output').innerHTML='<p>Boxes changed. Save corrections to rerun the local checks.</p>';$('direct-result').hidden=true;$('direct-vehicle-output').innerHTML='<p>Boxes changed. Save corrections to rerun subtype checks.</p>';drawEditor(redrawTable);$('direct-preview-status').textContent='Boxes changed. Save corrections to rebuild the exact context and crop previews before sending.';actions();}
   async function annotate(manual){
     const view=state.view;if(!view||state.busy||(view.model_result&&!(manual&&state.editingResult))||(!manual&&view.annotations))return;
-    const generation=state.generation;state.busy=true;feature('localization','running',manual?'Saving corrected subject boxes.':'Detecting and numbering subjects in the selected image.');feature('helmet','waiting','Waiting for numbered person boxes.');feature('vehicles','waiting','Waiting for numbered vehicle boxes.');$('direct-consent').checked=false;actions();message(manual?'Saving boxes and preparing exact crops locally.':'Detecting and numbering subjects locally. All checks stay on this computer.');
+    const generation=state.generation;state.busy=true;feature('localization','running',manual?'Saving corrected subject boxes.':'Detecting and numbering subjects in the selected image.');feature('helmet','waiting','Waiting for numbered person boxes.');feature('vehicles','waiting','Waiting for numbered vehicle boxes.');actions();message(manual?'Saving boxes and preparing exact crops locally.':'Detecting and numbering subjects locally. All checks stay on this computer.');
     try{const data={review_id:view.review_id,fingerprint:view.fingerprint};if(manual)data.subjects=state.draft.map(s=>({...s,bbox:[...s.bbox]}));const result=await api('/api/direct-annotate',data);if(generation!==state.generation||state.view!==view)return;if(result.review_id!==view.review_id)throw Error('The annotation response belongs to another review. Reopen this review.');draw(result);await runLocalModels(true);if(generation===state.generation)await runVehicleModels(true);if(generation===state.generation)await runPlateModels(true);state.libraryRefreshQueued=true;}
     catch(error){if(generation===state.generation&&state.view===view){feature('localization','error',error.message+' Add or correct boxes manually and save them.');feature('helmet','unavailable','No current numbered person boxes; save manual corrections to continue.');feature('vehicles','unavailable','No current numbered vehicle boxes; save manual corrections to continue.');$('direct-local').hidden=false;$('direct-local-output').innerHTML='<p>Subject localization failed. No helmet or vehicle conclusions are available. Add boxes manually to continue. This request error is not saved in the exported evidence.</p>';message(error.message+' You can add or correct boxes manually and save them.',true);}}
     finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
   async function runLocalModels(fromAnnotation=false){
     const view=state.view;if(!view||(!fromAnnotation&&(state.busy||state.backendUnsupported))||state.dirty||!view.annotations)return;
-    const generation=state.generation;state.busy=true;$('direct-consent').checked=false;actions();message('Checking helmets locally. All checks stay on this computer.');feature('helmet','running','Checking the same selected image with the local specialist.');
+    const generation=state.generation;state.busy=true;actions();message('Checking helmets locally. All checks stay on this computer.');feature('helmet','running','Checking the same selected image with the local specialist.');
     $('direct-local').hidden=false;$('direct-local-output').innerHTML='<p role="status">Checking helmets locally...</p>';
     try{
       const result=await api('/api/direct-local-models',{review_id:view.review_id,fingerprint:view.fingerprint});
@@ -196,12 +194,12 @@
       if(result.review_id!==view.review_id)throw Error('The local evidence belongs to another review. Reopen this review.');
       if(!localReady(result))throw Error('The local check did not return a completed or unavailable result.');
       draw(result);message(localEvidence(result).state==='complete'?'Local checks saved. Review the scores and exact previews. LLM explanation is optional.':'Local specialist unavailable. Review the reason below; retry locally or request an optional LLM interpretation with consent.');state.libraryRefreshQueued=true;
-    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.backendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run specialist models.';feature('helmet',unsupported?'unavailable':'error',detail);$('direct-local-output').innerHTML='<p>'+esc(detail)+'</p><p>Subject localization and current numbered vehicle counts remain available above. No new helmet evidence was saved. This request error is shown here only; the export contains the saved evidence and its last recorded status.</p>';message(detail,true);}}
+    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.backendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run helmet check.';feature('helmet',unsupported?'unavailable':'error',detail);$('direct-local-output').innerHTML='<p>'+esc(detail)+'</p><p>Subject localization and current numbered vehicle counts remain available above. No new helmet evidence was saved. This request error is shown here only; the export contains the saved evidence and its last recorded status.</p>';message(detail,true);}}
     finally{if(generation===state.generation&&!fromAnnotation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
   async function runVehicleModels(fromAnnotation=false){
     const view=state.view;if(!view||(!fromAnnotation&&(state.busy||state.vehicleBackendUnsupported))||state.dirty||!view.annotations)return;
-    const generation=state.generation,priorHelmet=state.features.helmet;state.busy=true;$('direct-consent').checked=false;feature('types','running','Checking vehicle subtype proposals on the same selected image.');actions();message('Checking vehicle subtypes locally. All checks stay on this computer.');
+    const generation=state.generation,priorHelmet=state.features.helmet;state.busy=true;feature('types','running','Checking vehicle subtype proposals on the same selected image.');actions();message('Checking vehicle subtypes locally. All checks stay on this computer.');
     $('direct-vehicle-evidence').hidden=false;$('direct-vehicle-output').innerHTML='<p>Checking vehicle subtype proposals locally...</p>';
     try{
       const result=await api('/api/direct-vehicle-types',{review_id:view.review_id,fingerprint:view.fingerprint});
@@ -210,12 +208,12 @@
       if(!['complete','unavailable'].includes(vehicleEvidence(result)?.state))throw Error('The subtype check did not return a completed or unavailable result.');
       draw(result);if(priorHelmet&&['error','unavailable'].includes(priorHelmet.status)){state.features.helmet=priorHelmet;renderFeatures();}
       message('Local report updated. Review each feature result, including unavailable checks. LLM explanation is optional.');state.libraryRefreshQueued=true;
-    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.vehicleBackendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run vehicle subtype model.';feature('types',unsupported?'unavailable':'error',detail);$('direct-vehicle-output').innerHTML='<p>'+esc(detail)+'</p><p>Other completed features remain available. This request error is shown here only; the export contains saved evidence.</p>';message(detail,true);}}
+    }catch(error){if(generation===state.generation&&state.view===view){const unsupported=error.message==='Unknown operation.';state.vehicleBackendUnsupported=unsupported;const detail=unsupported?'The running server needs the updated backend loaded. Retrying cannot fix this.':error.message+' Retry with Run subtype check.';feature('types',unsupported?'unavailable':'error',detail);$('direct-vehicle-output').innerHTML='<p>'+esc(detail)+'</p><p>Other completed features remain available. This request error is shown here only; the export contains saved evidence.</p>';message(detail,true);}}
     finally{if(generation===state.generation&&!fromAnnotation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
   }
   async function runPlateModels(fromAnnotation=false){
     const view=state.view;if(!view||(!fromAnnotation&&state.busy)||state.dirty||!view.annotations)return;
-    const generation=state.generation,previousFeatures={...state.features};state.busy=true;$('direct-consent').checked=false;feature('plates','running','Finding plate candidates and reading visible text locally.');actions();
+    const generation=state.generation,previousFeatures={...state.features};state.busy=true;feature('plates','running','Finding plate candidates and reading visible text locally.');actions();
     try{const result=await api('/api/direct-plates',{review_id:view.review_id,fingerprint:view.fingerprint});if(generation!==state.generation||state.view!==view)return;if(result.review_id!==view.review_id||!['complete','unavailable'].includes(result.plate_evidence?.state))throw Error('The plate check did not return a completed or unavailable result.');draw(result);for(const key of ['helmet','types'])if(previousFeatures[key]?.status==='error')state.features[key]=previousFeatures[key];renderFeatures();state.libraryRefreshQueued=true;message('Local checks saved. Inspect the image and evidence table. LLM interpretation is optional.');}
     catch(error){if(generation===state.generation&&state.view===view){feature('plates','error',error.message+' Retry using Run plate check.');message(error.message,true);}}
     finally{if(generation===state.generation&&!fromAnnotation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
@@ -223,7 +221,7 @@
   async function correctPlate(event){
     const button=event.target.closest('[data-plate-save]'),view=state.view;if(!button||!button.dataset.plateSave||!view||state.busy||state.dirty||view.source_readiness?.available===false)return;
     const input=Array.from($('direct-evidence-table').querySelectorAll('input[data-plate-vehicle]')).find(i=>i.dataset.plateVehicle===button.dataset.plateSave&&i.dataset.plateId===button.dataset.plateId);if(!input)return;
-    const generation=state.generation;state.busy=true;$('direct-consent').checked=false;actions();
+    const generation=state.generation;state.busy=true;actions();
     try{const result=await api('/api/direct-plate-correction',{review_id:view.review_id,fingerprint:view.fingerprint,vehicle_id:button.dataset.plateSave,plate_id:button.dataset.plateId,text:input.value});if(generation!==state.generation||state.view!==view)return;if(result.review_id!==view.review_id)throw Error('The plate correction belongs to another review.');draw(result);message('Plate correction saved separately from original OCR. Prior LLM assessment and review decision were cleared.');state.libraryRefreshQueued=true;}
     catch(error){if(generation===state.generation)message(error.message,true);}
     finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}
@@ -239,7 +237,7 @@
   }
   function draw(view){
     state.view=validateView(view,state.config?.evidence_origin);const current=state.view,generation=state.generation;featuresFromView(current);
-    state.loaded.clear();$('direct-consent').checked=false;$('direct-evidence').hidden=false;
+    state.loaded.clear();$('direct-evidence').hidden=false;
     state.dirty=false;state.editingResult=false;state.draft=list(current.annotations?.subjects).map(s=>({id:s.id,kind:s.kind,bbox:[...s.bbox],origin:s.origin}));
     $('direct-annotation-editor').hidden=!!current.model_result;
     const original=current.original_frame||current.frames[0],context=current.frames.find(f=>f.role==='context')||original;$('direct-drop-preview').hidden=!context?.url||context.available===false;$('direct-drop-preview').src=context?.available!==false?context?.url||'':'';$('direct-editor-image').src=original?.available!==false?original?.url||'':'';
@@ -255,7 +253,7 @@
     $('direct-provenance').hidden=!current.synthetic;
     $('direct-provenance').textContent=current.synthetic?'Synthetic source. This image review does not demonstrate real-world detection accuracy.':'';
     $('direct-preview').innerHTML=renderPreview(current);
-    $('direct-preview-status').textContent='Loading the exact prepared image. Inspect it before consenting to send.';
+    $('direct-preview-status').textContent='Loading the exact prepared image. Inspect it before choosing Send to LLM.';
     const images=Array.from($('direct-preview').querySelectorAll('img[data-direct-frame]'));
     for(const image of images){
       const ready=()=>{if(generation!==state.generation||state.view!==current)return;if(image.naturalWidth>0)state.loaded.add(image.dataset.directFrame);else state.loaded.delete(image.dataset.directFrame);$('direct-preview-status').textContent=current.frames.every(f=>state.loaded.has(f.id))?'All prepared images loaded. These are the exact images selected for sending.':'A prepared image could not load. Prepare it again before sending.';actions();};
@@ -271,7 +269,7 @@
     const results=await Promise.allSettled([api('/api/config'),api('/api/violation-llm')]);
     state.config=results[0].status==='fulfilled'?results[0].value:null;
     const llm=results[1].status==='fulfilled'?results[1].value:null;state.available=llm?.available===true;
-    $('direct-account').textContent=state.available?'LLM connection ready. Review the OpenAI sharing consent before sending.':'LLM image review needs your ChatGPT connection. Use Connect ChatGPT above, then Recheck connection. '+(llm?.message||'');
+    $('direct-account').textContent=state.available?'LLM connection ready. Review the images and OpenAI sharing notice before sending.':'LLM image review needs your ChatGPT connection. Use Connect ChatGPT above, then Recheck connection. '+(llm?.message||'');
     if(!state.config)message('Could not connect to the local server. Check that it is running, then choose Recheck connection.',true);actions();startQueuedImage();
   }
   function upload(file){return new Promise((resolve,reject)=>{
@@ -298,7 +296,7 @@
   async function open(id){if(state.busy)return;const generation=++state.generation;state.busy=true;clearView();actions();message('Opening saved image review. No new model request is made.');try{const view=await api('/api/direct-review?id='+encodeURIComponent(id));if(generation!==state.generation)return;if(view.review_id!==id)throw Error('The returned review does not match the selected review.');draw(view);message(view.model_result?'Saved LLM assessment restored. No new model request was made.':'Prepared review restored. Inspect its image before choosing to send.');}catch(error){if(generation===state.generation)message(error.message,true);}finally{if(generation===state.generation){state.busy=false;actions();if(state.libraryRefreshQueued)await loadLibrary();}}}
   async function mutate(action){
     const view=state.view;if(!view||state.busy)return;
-    if(action==='analyze'&&(state.dirty||!canSend(view,state.loaded,$('direct-consent').checked,state.available,false)))return;
+    if(action==='analyze'&&(state.dirty||!canSend(view,state.loaded,true,state.available,false)))return;
     if(action==='export'&&state.dirty)return;
     if(!['analyze','export'].includes(action)&&(!view.model_result||state.dirty))return;
     const generation=state.generation;state.busy=true;actions();message(action==='analyze'?'LLM is reviewing the selected image. Keep this page open while the request completes.':'Saving your local review.');
@@ -325,9 +323,9 @@
   $('direct-drop-zone').addEventListener('dragleave',()=> $('direct-drop-zone').classList.toggle('drag-active',false));
   $('direct-drop-zone').addEventListener('drop',event=>{event.preventDefault();$('direct-drop-zone').classList.toggle('drag-active',false);const files=Array.from(event.dataTransfer?.files||[]);if(files.length!==1){message('Drop one image or video at a time.',true);return;}return selectSource(files[0]);});
   $('direct-time').addEventListener('input',()=>{if(state.busy)return;state.generation++;clearView();message('Timestamp changed. Prepare the selected frame before sending.');actions();});
-  $('direct-rights').addEventListener('change',()=>{actions();return startQueuedImage();});$('direct-consent').addEventListener('change',actions);
+
   $('direct-prepare').addEventListener('click',prepare);$('direct-cancel').addEventListener('click',()=>state.upload?.abort());$('direct-send').addEventListener('click',()=>mutate('analyze'));
-  $('direct-edit-boxes').addEventListener('click',()=>{if(state.busy||!state.view?.model_result||state.view.source_readiness?.available===false)return;state.editingResult=true;$('direct-consent').checked=false;$('direct-annotation-editor').hidden=false;$('direct-annotation-editor').open=true;message('Editing boxes. The current assessment remains saved until you save corrections. Saving changes clears that assessment and your review decision.');actions();});
+  $('direct-edit-boxes').addEventListener('click',()=>{if(state.busy||!state.view?.model_result||state.view.source_readiness?.available===false)return;state.editingResult=true;$('direct-annotation-editor').hidden=false;$('direct-annotation-editor').open=true;message('Editing boxes. The current assessment remains saved until you save corrections. Saving changes clears that assessment and your review decision.');actions();});
   $('direct-cancel-box-edit').addEventListener('click',()=>{if(state.busy||!state.editingResult)return;draw(state.view);message('Box edits discarded. The saved assessment and decision are unchanged.');});
   $('direct-vehicle-run').addEventListener('click',()=>runVehicleModels());
   $('direct-plate-run').addEventListener('click',()=>runPlateModels());

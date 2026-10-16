@@ -50,7 +50,7 @@
       const value=config.violation_readiness;
       return {ready:value.ready===true,blockers:list(value.blockers).map(v=>plain(v?.message||v)),warnings:list(value.warnings).map(v=>plain(v?.message||v))};
     }
-    return {ready:config?.vehicle_tracking_ready===true,blockers:config?.vehicle_tracking_ready===true?[]:['Vehicle detection is unavailable. Install the verified YOLO11s model before starting detection.'],warnings:config?.helmet?.ready===true?[]:['Helmet detection is unavailable. Install the verified helmet model to assess helmet evidence.']};
+    return {ready:config?.vehicle_tracking_ready===true,blockers:config?.vehicle_tracking_ready===true?[]:['Vehicle detection is unavailable. Install the verified local detector before starting detection.'],warnings:config?.helmet?.ready===true?[]:['Helmet detection is unavailable. Install the verified helmet model to assess helmet evidence.']};
   }
   function renderFacts(facts, emptyMessage) {
     return list(facts).length?`<ul>${facts.map(f=>`<li>${escapeHTML(f.text||f.id||'Recorded fact')}${f.value!==undefined?` <strong>${escapeHTML(plain(f.value))}</strong>`:''}</li>`).join('')}</ul>`:`<p class="empty-facts">${escapeHTML(emptyMessage)}</p>`;
@@ -122,8 +122,8 @@
   }
   function actions() {
     const active = state.run && runActive(state.run), locked = state.busy || !!state.upload || active;
-    $('upload').disabled = !state.config || locked || !$('clip').files?.length || !$('rights').checked;
-    $('clip').disabled = !!locked; $('rights').disabled = !!locked;
+    $('upload').disabled = !state.config || locked || !$('clip').files?.length;
+    $('clip').disabled = !!locked;
     $('start').disabled = !state.media || !!locked || !readiness(state.config).ready;
     $('start').textContent=state.media&&state.run&&!active?'Run detection again':'Run detection';
     $('cancel-upload').hidden=!state.upload;
@@ -224,7 +224,7 @@
     finally{state.busy=false;actions();}
   }
   function uploadClip() {
-    const file=$('clip').files?.[0]; if(!file || !$('rights').checked || state.upload || state.busy || (state.run&&runActive(state.run)))return;
+    const file=$('clip').files?.[0]; if(!file || state.upload || state.busy || (state.run&&runActive(state.run)))return;
     if(!file.size){notice('Choose a nonempty video file.',true);return;}
     if(!/\.(mp4|mov|avi)$/i.test(file.name)){notice('Choose an MP4, MOV or AVI video clip. Still images cannot provide before-and-after motion evidence.',true);return;}
     clearTimeout(state.timer); ++state.generation; clearReview(); state.run=null;state.media=null;state.cancelPending=false; $('run-progress-wrap').hidden=true; notice('');
@@ -325,13 +325,14 @@
   async function loadLLM(refreshCards=false) {
     $('refresh-chatgpt').disabled=true;
     try{state.llm=await api('/api/violation-llm');}catch{state.llm={available:false,message:'Could not check the ChatGPT connection. Check the local server, then choose Recheck connection. Deterministic facts remain available.'};}
+    $('subscription-panel').hidden=state.llm.available===true;
     $('subscription-status').textContent=state.llm.available===true?'LLM connection ready':'No LLM explanation available';$('subscription-message').textContent=state.llm.available===true?'LLM connection ready. Account eligibility is checked when requesting a model.':state.llm.message||'Deterministic evidence remains available without an LLM connection.';$('connect-chatgpt').hidden=state.llm.available===true;
     $('refresh-chatgpt').disabled=false;
     if(refreshCards&&state.review&&state.pendingCards===0)drawCards();
   }
   async function init() {
-    $('clip').addEventListener('change',()=>{$('selected-file').textContent=$('clip').files?.[0]?.name||'No clip selected.';$('rights').checked=false;actions();});
-    $('rights').addEventListener('change',actions);$('upload').addEventListener('click',uploadClip);$('cancel-upload').addEventListener('click',()=>state.upload?.abort());$('start').addEventListener('click',startRun);$('cancel-run').addEventListener('click',cancelRun);$('recheck').addEventListener('click',loadConfig);
+    $('clip').addEventListener('change',()=>{$('selected-file').textContent=$('clip').files?.[0]?.name||'No clip selected.';actions();});
+    $('upload').addEventListener('click',uploadClip);$('cancel-upload').addEventListener('click',()=>state.upload?.abort());$('start').addEventListener('click',startRun);$('cancel-run').addEventListener('click',cancelRun);$('recheck').addEventListener('click',loadConfig);
     $('demo-run').addEventListener('click',runDemo);
     $('refresh-run').addEventListener('click',()=>{if(state.run){clearTimeout(state.timer);pollRun(state.run.id,state.generation);}});
     $('refresh-review').addEventListener('click',()=>{if(state.run)loadReview(state.run.id);});$('rule-filter').addEventListener('change',drawCards);$('cards').addEventListener('click',cardAction);$('cards').addEventListener('input',event=>{if(event.target.matches('[data-slot="note"]'))state.drafts.set(event.target.closest('[data-card-id]').dataset.cardId,event.target.value);});$('export-review').addEventListener('click',exportReview);

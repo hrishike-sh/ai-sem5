@@ -62,32 +62,31 @@ test('saved direct assessments reopen without inference or a current connection 
   const h=harness(path=>path==='/api/violation-llm'?{available:false}:path.startsWith('/api/direct-review')?view({model_result:assessment,review:{decision:'reject',note:'Retain my note'},source_readiness:{available:false,reason:'Original file changed.'}}):undefined,'review-1');
   await h.settle();assert.match(h.element('direct-result').innerHTML,/A rider is visible/);assert.match(h.element('direct-message').textContent,/No new model request/);assert.match(h.element('direct-disposition').textContent,/rejected/);assert.equal(h.element('direct-note').value,'Retain my note');assert.equal(h.element('direct-source-warning').hidden,false);assert.match(h.element('direct-source-warning').textContent,/Original file changed/);assert.equal(h.element('direct-send').hidden,true);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
-test('loaded preview and explicit consent trigger one bound Astra request and prevent accidental repeat sends',async()=>{
+test('explicit Send to LLM click sends consent and one bound request only after all previews load',async()=>{
   let release;const h=harness(path=>path==='/api/direct-analyze'?new Promise(resolve=>release=resolve):undefined,'review-1');await h.settle();
-  h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
   h.loaded();assert.equal(h.element('direct-send').disabled,false);
   const pending=h.element('direct-send').listeners.click();await h.settle();assert.equal(h.element('direct-send').disabled,true);await h.click('direct-send');
   const calls=h.requests.filter(r=>r.path==='/api/direct-analyze');assert.equal(calls.length,1);assert.deepEqual(JSON.parse(calls[0].options.body),{review_id:'review-1',fingerprint:'fingerprint-1',consent:true});assert.equal(calls[0].options.headers['X-Traffic-Token'],'csrf-direct');
   release(view({model_result:assessment}));await pending;await h.settle();assert.equal(h.element('direct-send').hidden,true);await h.click('direct-send');assert.equal(h.requests.filter(r=>r.path==='/api/direct-analyze').length,1);
 });
 test('a failed preview cannot be sent and timestamp changes invalidate the former consent and preview',async()=>{
-  const h=harness(undefined,'review-1');await h.settle();h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();
+  const h=harness(undefined,'review-1');await h.settle();h.loaded();
   h.element('direct-preview').images[0].listeners.error();assert.equal(h.element('direct-send').disabled,true);assert.match(h.element('direct-preview-status').textContent,/could not load/);
-  h.loaded();assert.equal(h.element('direct-send').disabled,false);h.element('direct-time').value='3';h.element('direct-time').listeners.input();assert.equal(h.element('direct-send').disabled,true);assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-evidence').hidden,true);await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  h.loaded();assert.equal(h.element('direct-send').disabled,false);h.element('direct-time').value='3';h.element('direct-time').listeners.input();assert.equal(h.element('direct-send').disabled,true);assert.equal(h.element('direct-evidence').hidden,true);await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
-test('raw source upload requires permission, works without detector models, and prepares locally without a model call',async()=>{
-  const h=harness();await h.settle();const file={name:'street photo.png'};h.element('direct-file').files=[file];h.element('direct-file').listeners.change();assert.equal(h.element('direct-prepare').disabled,true);await h.click('direct-prepare');assert.equal(h.uploads.length,0);
-  h.element('direct-rights').checked=true;const pending=h.element('direct-rights').listeners.change();assert.equal(h.element('direct-prepare').disabled,true);assert.equal(h.uploads.length,1);assert.equal(h.uploads[0].body,file);assert.equal(h.uploads[0].headers['X-Traffic-Token'],'csrf-direct');assert.equal(h.uploads[0].url,'/api/upload?name=street%20photo.png');h.uploads[0].finish();await pending;await h.settle();
+test('selecting a raw source starts local upload, works without detector models, and prepares locally without a model call',async()=>{
+  const h=harness();await h.settle();const file={name:'street photo.png'};h.element('direct-file').files=[file];const pending=h.element('direct-file').listeners.change();assert.equal(h.element('direct-prepare').disabled,true);assert.equal(h.uploads.length,1);assert.equal(h.uploads[0].body,file);assert.equal(h.uploads[0].headers['X-Traffic-Token'],'csrf-direct');assert.equal(h.uploads[0].url,'/api/upload?name=street%20photo.png');h.uploads[0].finish();await pending;await h.settle();
   const prep=h.requests.find(r=>r.path==='/api/direct-prepare');assert.deepEqual(JSON.parse(prep.options.body),{media:'media-1',source_revision:'revision-1',timestamp:0});assert.equal(h.requests.some(r=>r.path.includes('analyze')||r.path==='/api/job'),false);assert.equal(h.element('direct-evidence').hidden,false);
 });
 test('cancelled direct upload releases controls without creating a preparation or model request',async()=>{
-  const h=harness();await h.settle();h.element('direct-file').files=[{name:'video.mp4'}];h.element('direct-file').listeners.change();h.element('direct-rights').checked=true;h.element('direct-rights').listeners.change();const pending=h.element('direct-prepare').listeners.click();await h.click('direct-cancel');await pending;assert.equal(h.element('direct-prepare').disabled,false);assert.match(h.element('direct-message').textContent,/cancelled/);assert.equal(h.requests.some(r=>r.path==='/api/direct-prepare'),false);
+  const h=harness();await h.settle();h.element('direct-file').files=[{name:'video.mp4'}];h.element('direct-file').listeners.change();const pending=h.element('direct-prepare').listeners.click();await h.click('direct-cancel');await pending;assert.equal(h.element('direct-prepare').disabled,false);assert.match(h.element('direct-message').textContent,/cancelled/);assert.equal(h.requests.some(r=>r.path==='/api/direct-prepare'),false);
 });
 test('direct decisions preserve model assessment and use bound identities, exports use the trusted local server',async()=>{
   const h=harness((path,options)=>path.startsWith('/api/direct-review')?view({model_result:assessment}):path==='/api/direct-decision'?view({model_result:assessment,review:{decision:JSON.parse(options.body).decision,note:JSON.parse(options.body).note}}):path==='/api/direct-export'?{url:'http://127.0.0.1:5000/token/review.json',filename:'review.json'}:undefined,'review-1');await h.settle();h.element('direct-note').value='Human note';await h.click('direct-accept');assert.match(h.element('direct-disposition').textContent,/accepted/);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);assert.equal(h.element('direct-note').value,'Human note');const decision=h.requests.find(r=>r.path==='/api/direct-decision');assert.deepEqual(JSON.parse(decision.options.body),{review_id:'review-1',fingerprint:'fingerprint-1',decision:'accept',note:'Human note'});await h.click('direct-export');assert.deepEqual(h.downloads,['http://127.0.0.1:5000/token/review.json']);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 test('direct analysis errors remain actionable and never invoke an alternate route or model',async()=>{
-  const h=harness(path=>path==='/api/direct-analyze'?{error:'Astra is unavailable.'}:undefined,'review-1');await h.settle();h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();await h.click('direct-send');assert.match(h.element('direct-message').textContent,/Astra is unavailable/);assert.match(h.element('direct-message').textContent,/No alternate model or paid API fallback/);assert.equal(h.element('direct-evidence').hidden,false);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,1);
+  const h=harness(path=>path==='/api/direct-analyze'?{error:'Astra is unavailable.'}:undefined,'review-1');await h.settle();h.loaded();await h.click('direct-send');assert.match(h.element('direct-message').textContent,/Astra is unavailable/);assert.match(h.element('direct-message').textContent,/No alternate model or paid API fallback/);assert.equal(h.element('direct-evidence').hidden,false);assert.equal(h.requests.filter(r=>r.options.method==='POST').length,1);
 });
 
 
@@ -95,10 +94,10 @@ test('unannotated and empty subject previews cannot be sent',()=>{
   for(const annotations of [null,{subjects:[]}])assert.equal(direct.canSend(view({annotations}),new Set(['image-1']),true,true,false),false);
 });
 test('corrections reset consent and require rebuilt exact previews',async()=>{
-  const h=harness(path=>path==='/api/direct-annotate'?view({fingerprint:'corrected',frames:[{...frame,id:'context'},{...frame,id:'P1-crop'}]}):undefined,'review-1');await h.settle();h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();
-  await h.click('direct-add-box');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-send').disabled,true);h.element('direct-consent').checked=true;await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
-  await h.click('direct-save-boxes');const req=h.requests.find(r=>r.path==='/api/direct-annotate'),data=JSON.parse(req.options.body);assert.equal(data.subjects[0].id,'P1');assert.equal(data.subjects[1].id,undefined);assert.equal(data.subjects[1].origin,'manual');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-send').disabled,true);
-  h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+  const h=harness(path=>path==='/api/direct-annotate'?view({fingerprint:'corrected',frames:[{...frame,id:'context'},{...frame,id:'P1-crop'}]}):undefined,'review-1');await h.settle();h.loaded();
+  await h.click('direct-add-box');assert.equal(h.element('direct-send').disabled,true);await h.click('direct-send');assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  await h.click('direct-save-boxes');const req=h.requests.find(r=>r.path==='/api/direct-annotate'),data=JSON.parse(req.options.body);assert.equal(data.subjects[0].id,'P1');assert.equal(data.subjects[1].id,undefined);assert.equal(data.subjects[1].origin,'manual');assert.equal(h.element('direct-send').disabled,true);
+  h.loaded();assert.equal(h.element('direct-send').disabled,false);
 });
 test('per-ID assessments preserve unclear versus no visible violation and escape canonical text',()=>{
   const result={model:'Astra',subject_results:[{id:'P1',status:'unclear',role:'unclear',observations:[{text:'<script>unsafe()</script>',evidence_ids:['image-1']}],suspected_issues:[]},{id:'V1',status:'no_visible_violation',role:'vehicle',observations:[],suspected_issues:[]}],limitations:['<b>One frame</b>']};
@@ -108,7 +107,7 @@ test('detector failure preserves local manual editing without a model call',asyn
   const h=harness(path=>path==='/api/direct-annotate'?{error:'Local detector unavailable.'}:path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/Local detector unavailable/);assert.match(h.element('direct-message').textContent,/manually/);assert.equal(h.element('direct-add-box').disabled,false);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 test('late image events from previous annotations cannot unlock sending',async()=>{
-  const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();const old=h.element('direct-preview').images[0];await h.click('direct-annotate');h.element('direct-consent').checked=true;old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();const old=h.element('direct-preview').images[0];await h.click('direct-annotate');old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();assert.equal(h.element('direct-send').disabled,false);
 });
 
 
@@ -116,7 +115,7 @@ test('cross-category corrections request a new ID while same-family edits keep t
   const h=harness(undefined,'review-1');await h.settle();h.element('direct-boxes').listeners.change({target:{dataset:{boxIndex:'0',boxField:'kind'},value:'motorcycle'}});await h.click('direct-save-boxes');const data=JSON.parse(h.requests.find(r=>r.path==='/api/direct-annotate').options.body);assert.equal(data.subjects[0].id,undefined);assert.equal(data.subjects[0].kind,'motorcycle');assert.equal(data.subjects[0].origin,'manual');
 });
 test('annotation responses for another review cannot replace current evidence',async()=>{
-  const h=harness(path=>path==='/api/direct-annotate'?view({review_id:'wrong-review',fingerprint:'wrong',frames:[{...frame,id:'wrong-frame'}]}):path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/another review/);assert.doesNotMatch(h.element('direct-preview').innerHTML,/wrong-frame/);assert.match(h.element('direct-source').textContent,/review-1/);assert.equal(h.element('direct-consent').checked,false);
+  const h=harness(path=>path==='/api/direct-annotate'?view({review_id:'wrong-review',fingerprint:'wrong',frames:[{...frame,id:'wrong-frame'}]}):path.startsWith('/api/direct-review')?view({annotations:null}):undefined,'review-1');await h.settle();await h.click('direct-annotate');assert.match(h.element('direct-message').textContent,/another review/);assert.doesNotMatch(h.element('direct-preview').innerHTML,/wrong-frame/);assert.match(h.element('direct-source').textContent,/review-1/);
 });
 test('per-subject issue cards show canonical uncertainty and associated IDs',()=>{
   const html=direct.renderResult({subject_results:[{id:'P1',role:'rider',associated_vehicle_id:'V1',status:'suspected_issue',observations:[],suspected_issues:[{text:'Possible helmet concern.',evidence_ids:['image-1'],related_subject_ids:['P1','V1']}],uncertainty_text:['Head partly obscured.']}],limitations:[]},[frame],view().annotations);
@@ -138,9 +137,9 @@ test('saved assessments can edit boxes and saving clears old decisions with fres
   let saved=view({model_result:assessment,review:{decision:'accept',note:'Original note'}});
   const h=harness((path,options)=>path.startsWith('/api/direct-review')?saved:path==='/api/direct-annotate'?(saved=view({fingerprint:'revision-2',frames:[{...frame,id:'new-context'},{...frame,id:'new-crop'}]})):undefined,'review-1');await h.settle();
   assert.equal(h.element('direct-edit-boxes').hidden,false);assert.equal(h.element('direct-annotation-editor').hidden,true);await h.click('direct-edit-boxes');assert.equal(h.element('direct-annotation-editor').hidden,false);assert.match(h.element('direct-message').textContent,/Saving changes clears/);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);
-  h.element('direct-consent').checked=true;await h.click('direct-add-box');assert.equal(h.element('direct-consent').checked,false);for(const id of ['direct-accept','direct-reject','direct-reset','direct-export'])assert.equal(h.element(id).disabled,true);await h.click('direct-accept');await h.click('direct-export');assert.equal(h.requests.some(r=>r.path==='/api/direct-decision'||r.path==='/api/direct-export'),false);
-  const old=h.element('direct-preview').images[0];await h.click('direct-save-boxes');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');assert.equal(h.element('direct-consent').checked,false);h.element('direct-consent').checked=true;old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
-  const reopened=harness(path=>path.startsWith('/api/direct-review')?saved:undefined,'review-1');await reopened.settle();assert.equal(reopened.element('direct-result').hidden,true);assert.equal(reopened.element('direct-consent').checked,false);assert.equal(reopened.element('direct-send').disabled,true);
+  await h.click('direct-add-box');for(const id of ['direct-accept','direct-reject','direct-reset','direct-export'])assert.equal(h.element(id).disabled,true);await h.click('direct-accept');await h.click('direct-export');assert.equal(h.requests.some(r=>r.path==='/api/direct-decision'||r.path==='/api/direct-export'),false);
+  const old=h.element('direct-preview').images[0];await h.click('direct-save-boxes');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');old.naturalWidth=640;old.listeners.load();assert.equal(h.element('direct-send').disabled,true);h.loaded();assert.equal(h.element('direct-send').disabled,false);
+  const reopened=harness(path=>path.startsWith('/api/direct-review')?saved:undefined,'review-1');await reopened.settle();assert.equal(reopened.element('direct-result').hidden,true);assert.equal(reopened.element('direct-send').disabled,true);
 });
 test('discarding saved-result box edits preserves assessment and decision without a write',async()=>{
   const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment,review:{decision:'reject',note:'Keep'}}):undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');await h.click('direct-add-box');await h.click('direct-cancel-box-edit');assert.equal(h.element('direct-annotation-editor').hidden,true);assert.match(h.element('direct-result').innerHTML,/A rider is visible/);assert.match(h.element('direct-disposition').textContent,/rejected/);assert.equal(h.element('direct-note').value,'Keep');assert.equal(h.element('direct-accept').disabled,false);assert.equal(h.requests.some(r=>r.options.method==='POST'),false);
@@ -165,9 +164,9 @@ test('crop labels use bound annotations when subject metadata is absent and esca
 
 
 test('typing a coordinate invalidates saved-result actions immediately without replacing the input table',async()=>{
-  const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment}):undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');h.element('direct-consent').checked=true;
+  const h=harness(path=>path.startsWith('/api/direct-review')?view({model_result:assessment}):undefined,'review-1');await h.settle();await h.click('direct-edit-boxes');
   const table=h.element('direct-boxes'),before=table.innerHTML;let replacements=0;Object.defineProperty(table,'innerHTML',{get:()=>before,set:()=>{replacements++;},configurable:true});
-  const input={dataset:{boxIndex:'0',boxField:'0'},value:'17'};table.listeners.input({target:input});assert.equal(replacements,0);assert.equal(input.value,'17');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-save-boxes').disabled,false);for(const action of ['accept','reject','reset','export'])assert.equal(h.element('direct-'+action).disabled,true);assert.match(h.element('direct-preview-status').textContent,/Boxes changed/);
+  const input={dataset:{boxIndex:'0',boxField:'0'},value:'17'};table.listeners.input({target:input});assert.equal(replacements,0);assert.equal(input.value,'17');assert.equal(h.element('direct-save-boxes').disabled,false);for(const action of ['accept','reject','reset','export'])assert.equal(h.element('direct-'+action).disabled,true);assert.match(h.element('direct-preview-status').textContent,/Boxes changed/);
   await h.click('direct-export');assert.equal(h.requests.some(r=>r.path==='/api/direct-export'),false);await h.click('direct-save-boxes');const sent=JSON.parse(h.requests.find(r=>r.path==='/api/direct-annotate').options.body);assert.equal(sent.subjects[0].bbox[0],17);
 });
 
@@ -189,15 +188,15 @@ test('numbering automatically runs bound local specialist endpoint and waits bef
   let release;
   const h=harness(path=>path.startsWith('/api/direct-review')?view({annotations:null,local_evidence:null}):path==='/api/direct-annotate'?view({fingerprint:'numbered',local_evidence:null}):path==='/api/direct-local-models'?new Promise(resolve=>release=resolve):undefined,'review-1');
   await h.settle();const pending=h.element('direct-annotate').listeners.click();await h.settle();
-  const call=h.requests.find(r=>r.path==='/api/direct-local-models');assert.deepEqual(JSON.parse(call.options.body),{review_id:'review-1',fingerprint:'numbered'});assert.equal(call.options.headers['X-Traffic-Token'],'csrf-direct');assert.match(h.element('direct-message').textContent,/Checking helmets locally/);assert.equal(h.element('direct-consent').disabled,true);assert.equal(h.element('direct-send').disabled,true);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
-  release(view({fingerprint:'locally-checked'}));await pending;h.loaded();assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-send').disabled,true);h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);
+  const call=h.requests.find(r=>r.path==='/api/direct-local-models');assert.deepEqual(JSON.parse(call.options.body),{review_id:'review-1',fingerprint:'numbered'});assert.equal(call.options.headers['X-Traffic-Token'],'csrf-direct');assert.match(h.element('direct-message').textContent,/Checking helmets locally/);assert.equal(h.element('direct-send').disabled,true);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  release(view({fingerprint:'locally-checked'}));await pending;h.loaded();assert.equal(h.element('direct-send').disabled,false);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 
 test('local endpoint failure offers retry and cannot silently unlock Astra',async()=>{
   let attempts=0;
   const h=harness(path=>path.startsWith('/api/direct-review')?view({local_evidence:null}):path==='/api/direct-local-models'?(++attempts===1?{error:'Local model runtime failed.'}:view({local_evidence:{state:'unavailable',reason:'Weights not installed.',subjects:[]}})):undefined,'review-1');
-  await h.settle();h.loaded();await h.click('direct-local-run');assert.match(h.element('direct-message').textContent,/Retry with Run specialist models/);assert.equal(h.element('direct-local-run').disabled,false);assert.equal(h.element('direct-send').disabled,true);
-  await h.click('direct-local-run');assert.match(h.element('direct-local-output').innerHTML,/Weights not installed/);h.loaded();h.element('direct-consent').checked=true;h.element('direct-consent').listeners.change();assert.equal(h.element('direct-send').disabled,false);assert.equal(h.requests.filter(r=>r.path==='/api/direct-local-models').length,2);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  await h.settle();h.loaded();await h.click('direct-local-run');assert.match(h.element('direct-message').textContent,/Retry with Run helmet check/);assert.equal(h.element('direct-local-run').disabled,false);assert.equal(h.element('direct-send').disabled,true);
+  await h.click('direct-local-run');assert.match(h.element('direct-local-output').innerHTML,/Weights not installed/);h.loaded();assert.equal(h.element('direct-send').disabled,false);assert.equal(h.requests.filter(r=>r.path==='/api/direct-local-models').length,2);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 
 test('local scores reopen without rerunning and remain separate from saved Astra interpretation',async()=>{
@@ -212,8 +211,8 @@ test('local evidence exports without requesting an Astra assessment',async()=>{
 
 test('legacy saved Astra reviews can explicitly run specialists and clear downstream results',async()=>{
   const h=harness(path=>path.startsWith('/api/direct-review')?view({local_evidence:null,model_result:assessment,review:{decision:'accept',note:'Old decision'}}):path==='/api/direct-local-models'?view({fingerprint:'local-refresh'}):undefined,'review-1');await h.settle();
-  assert.equal(h.element('direct-local-run').disabled,false);assert.match(h.element('direct-local-run').textContent,/clears LLM review/);assert.equal(h.element('direct-local-rerun-notice').hidden,false);assert.match(h.element('direct-local-output').innerHTML,/Run specialist models/);
-  await h.click('direct-local-run');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');assert.equal(h.element('direct-consent').checked,false);assert.equal(h.element('direct-local-rerun-notice').hidden,true);h.loaded();assert.equal(h.element('direct-send').disabled,true);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  assert.equal(h.element('direct-local-run').disabled,false);assert.match(h.element('direct-local-run').textContent,/clears LLM review/);assert.equal(h.element('direct-local-rerun-notice').hidden,false);assert.match(h.element('direct-local-output').innerHTML,/Run helmet check/);
+  await h.click('direct-local-run');assert.equal(h.element('direct-result').hidden,true);assert.equal(h.element('direct-decision').hidden,true);assert.equal(h.element('direct-note').value,'');assert.equal(h.element('direct-local-rerun-notice').hidden,true);h.loaded();assert.equal(h.element('direct-send').disabled,false);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 
 test('unavailable evidence with a saved Astra assessment can retry while a failure preserves the saved review',async()=>{
@@ -229,31 +228,30 @@ test('local score display uses three decimals while exact values remain availabl
   assert.match(html,/>0\.803</);assert.match(html,/title="Exact raw model score: 0\.8032053112983704"/);assert.equal(JSON.stringify(evidence),before);assert.doesNotMatch(html,/[^\x00-\x7F]/);
 });
 
-test('dropping an image queues it until permission then runs each local stage once without hosted sends',async()=>{
+test('dropping an image runs each local stage once without hosted sends',async()=>{
   const h=harness(path=>path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):path==='/api/direct-annotate'?view({fingerprint:'numbered',local_evidence:null}):undefined);await h.settle();
-  const file={name:'dropped.jpg'};const event={preventDefault(){},dataTransfer:{files:[file]}};await h.element('direct-drop-zone').listeners.drop(event);assert.equal(h.uploads.length,0);assert.match(h.element('direct-message').textContent,/Image queued/);
-  h.element('direct-rights').checked=true;const pending=h.element('direct-rights').listeners.change();assert.equal(h.uploads.length,1);assert.equal(h.uploads[0].body,file);assert.equal(h.element('direct-feature-localization').dataset.status,'running');h.uploads[0].finish();await pending;await h.settle();
-  for(const path of ['/api/direct-prepare','/api/direct-annotate','/api/direct-local-models'])assert.equal(h.requests.filter(r=>r.path===path).length,1);
-  assert.equal(h.element('direct-feature-localization').dataset.status,'complete');assert.equal(h.element('direct-feature-helmet').dataset.status,'complete');assert.equal(h.element('direct-feature-vehicles').dataset.status,'complete');assert.equal(h.element('direct-report').hidden,false);assert.equal(h.element('direct-consent').checked,false);
-  h.element('direct-rights').checked=false;await h.element('direct-rights').listeners.change();h.element('direct-rights').checked=true;await h.element('direct-rights').listeners.change();await h.element('direct-drop-zone').listeners.drop(event);assert.equal(h.uploads.length,1);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
+  const file={name:'dropped.jpg'};const event={preventDefault(){},dataTransfer:{files:[file]}};const pending=h.element('direct-drop-zone').listeners.drop(event);assert.equal(h.uploads.length,1);assert.equal(h.uploads[0].body,file);assert.equal(h.element('direct-feature-localization').dataset.status,'running');h.uploads[0].finish();await pending;await h.settle();
+  for(const path of ['/api/direct-prepare','/api/direct-annotate','/api/direct-local-models','/api/direct-vehicle-types','/api/direct-plates'])assert.equal(h.requests.filter(r=>r.path===path).length,1);
+  assert.equal(h.element('direct-feature-localization').dataset.status,'complete');assert.equal(h.element('direct-feature-helmet').dataset.status,'complete');assert.equal(h.element('direct-feature-vehicles').dataset.status,'complete');assert.equal(h.element('direct-feature-types').dataset.status,'complete');assert.equal(h.element('direct-feature-plates').dataset.status,'complete');assert.equal(h.element('direct-report').hidden,false);
+  await h.element('direct-drop-zone').listeners.drop(event);assert.equal(h.uploads.length,1);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
 });
 
 test('permitted image replacement aborts previous upload and ignores its late completion',async()=>{
-  const h=harness(path=>path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();h.element('direct-rights').checked=true;
+  const h=harness(path=>path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();
   const first=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'old.jpg'}]}});assert.equal(h.uploads.length,1);
-  const second=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'new.jpg'}]}});assert.equal(h.uploads.length,2);h.uploads[0].finish({id:'old',source_revision:'old-revision'});h.uploads[1].finish({id:'new',source_revision:'new-revision'});await Promise.all([first,second]);
+  const second=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'new.jpg'}]}});assert.equal(h.uploads.length,2);h.uploads[0].finish({id:'old',source_revision:'old-revision'});h.uploads[1].finish({id:'new',source_revision:'new-revision'});await Promise.all([first,second]);assert.equal(h.requests.some(r=>r.path==='/api/direct-analyze'),false);
   const calls=h.requests.filter(r=>r.path==='/api/direct-prepare');assert.equal(calls.length,1);assert.equal(JSON.parse(calls[0].options.body).media,'new');assert.equal(h.element('direct-filename').textContent,'new.jpg');
 });
 
 test('replacement waits for active inference before uploading and cannot overwrite the newer source report',async()=>{
   let release,preparations=0;
-  const h=harness(path=>path==='/api/direct-prepare'?view({review_id:++preparations===1?'old-review':'new-review',source:{name:preparations===1?'old.jpg':'new.jpg'},annotations:null,local_evidence:null}):path==='/api/direct-annotate'&&preparations===1?new Promise(resolve=>release=resolve):path==='/api/direct-annotate'?view({review_id:'new-review',source:{name:'new.jpg'}}):undefined);await h.settle();h.element('direct-rights').checked=true;
+  const h=harness(path=>path==='/api/direct-prepare'?view({review_id:++preparations===1?'old-review':'new-review',source:{name:preparations===1?'old.jpg':'new.jpg'},annotations:null,local_evidence:null}):path==='/api/direct-annotate'&&preparations===1?new Promise(resolve=>release=resolve):path==='/api/direct-annotate'?view({review_id:'new-review',source:{name:'new.jpg'}}):undefined);await h.settle();
   const first=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'old.jpg'}]}});h.uploads[0].finish();await h.settle();
   const second=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'new.jpg'}]}});assert.equal(h.uploads.length,1);assert.match(h.element('direct-feature-localization-detail').textContent,/Waiting for the previous local check/);release(view({review_id:'old-review',source:{name:'old.jpg'}}));await first;await h.settle();assert.equal(h.uploads.length,2);h.uploads[1].finish();await second;assert.match(h.element('direct-source').textContent,/new.jpg/);assert.doesNotMatch(h.element('direct-source').textContent,/old.jpg/);assert.equal(h.requests.filter(r=>r.path==='/api/direct-local-models').length,1);
 });
 
 test('video drops keep timestamp selection explicit and reject multiple files',async()=>{
-  const h=harness();await h.settle();h.element('direct-rights').checked=true;await h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'video.mp4'}]}});assert.equal(h.uploads.length,0);assert.equal(h.element('direct-time-wrap').hidden,false);assert.equal(h.element('direct-prepare').disabled,false);await h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'a.jpg'},{name:'b.jpg'}]}});assert.match(h.element('direct-message').textContent,/one image or video/);assert.equal(h.uploads.length,0);
+  const h=harness();await h.settle();await h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'video.mp4'}]}});assert.equal(h.uploads.length,0);assert.equal(h.element('direct-time-wrap').hidden,false);assert.equal(h.element('direct-prepare').disabled,false);await h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'a.jpg'},{name:'b.jpg'}]}});assert.match(h.element('direct-message').textContent,/one image or video/);assert.equal(h.uploads.length,0);
 });
 
 test('outdated backend is explicit and preserves other feature successes without futile retry',async()=>{
@@ -289,14 +287,14 @@ test('reopening subtype evidence does not rerun any specialist and saved correct
 
 test('queued image waits for initial pending library read before uploading or mutating',async()=>{
   let release,count=0;
-  const h=harness(path=>path==='/api/direct-library'&&++count===1?new Promise(resolve=>release=resolve):path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();h.element('direct-rights').checked=true;
+  const h=harness(path=>path==='/api/direct-library'&&++count===1?new Promise(resolve=>release=resolve):path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();
   await h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'queued.jpg'}]}});assert.equal(h.uploads.length,0);assert.equal(h.requests.some(r=>r.options.method==='POST'),false);
   release({reviews:[]});await h.settle();assert.equal(h.uploads.length,1);h.uploads[0].finish();await h.settle();assert.equal(h.requests.filter(r=>r.path==='/api/direct-annotate').length,1);assert.equal(h.requests.filter(r=>r.path==='/api/direct-vehicle-types').length,1);
 });
 
 test('automatic pipeline refreshes library only after all bound mutations finish',async()=>{
   let release,libraryCalls=0;
-  const h=harness(path=>path==='/api/direct-library'?(++libraryCalls===1?{reviews:[]}:new Promise(resolve=>release=resolve)):path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();h.element('direct-rights').checked=true;
+  const h=harness(path=>path==='/api/direct-library'?(++libraryCalls===1?{reviews:[]}:new Promise(resolve=>release=resolve)):path==='/api/direct-prepare'?view({annotations:null,local_evidence:null}):undefined);await h.settle();
   const pending=h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name:'serial.jpg'}]}});h.uploads[0].finish();await h.settle();const relevant=h.requests.filter(r=>r.path.startsWith('/api/direct-')&&r.path!=='/api/direct-review').map(r=>r.path);
   assert.deepEqual(relevant,['/api/direct-library','/api/direct-prepare','/api/direct-annotate','/api/direct-local-models','/api/direct-vehicle-types','/api/direct-plates','/api/direct-library']);assert.equal(libraryCalls,2);release({reviews:[]});await pending;
 });
@@ -308,7 +306,7 @@ test('manual specialist mutation waits for a pending library refresh and never r
 
 test('only the latest replacement starts after an active inference fails; no old downstream request runs',async()=>{
   let release,preparations=0;
-  const h=harness(path=>path==='/api/direct-prepare'?view({annotations:null,local_evidence:null,source:{name:++preparations===1?'old.jpg':'latest.jpg'}}):path==='/api/direct-annotate'&&preparations===1?new Promise(resolve=>release=resolve):undefined);await h.settle();h.element('direct-rights').checked=true;
+  const h=harness(path=>path==='/api/direct-prepare'?view({annotations:null,local_evidence:null,source:{name:++preparations===1?'old.jpg':'latest.jpg'}}):path==='/api/direct-annotate'&&preparations===1?new Promise(resolve=>release=resolve):undefined);await h.settle();
   const drop=name=>h.element('direct-drop-zone').listeners.drop({preventDefault(){},dataTransfer:{files:[{name}]}});
   const first=drop('old.jpg');h.uploads[0].finish();await h.settle();const skipped=drop('skip.jpg'),latest=drop('latest.jpg');assert.equal(h.uploads.length,1);release({error:'Previous detector failed.'});await first;await skipped;await h.settle();assert.equal(h.uploads.length,2);assert.equal(h.uploads[1].body.name,'latest.jpg');h.uploads[1].finish();await latest;assert.equal(h.requests.filter(r=>r.path==='/api/direct-local-models').length,1);assert.equal(h.requests.filter(r=>r.path==='/api/direct-vehicle-types').length,1);assert.equal(h.element('direct-filename').textContent,'latest.jpg');assert.doesNotMatch(h.element('direct-message').textContent,/Previous detector failed/);
 });
@@ -341,8 +339,8 @@ test('needs-input counts remain waiting when source localization is unavailable'
 
 test('direct sharing consent explicitly names OpenAI and ChatGPT while ordinary review labels use LLM',()=>{
  const html=fs.readFileSync(require.resolve('../web/violation_lens.html'),'utf8');
- assert.match(html,/send these images, their subject identifiers, and local model evidence to OpenAI for LLM review through my ChatGPT plan/);
- assert.match(html,/Ask LLM to explain/);assert.doesNotMatch(html,/Astra/);
+ assert.match(html,/Send the previewed images, subject identifiers, and local evidence to OpenAI for LLM review/);
+ assert.match(html,/Send to LLM/);assert.doesNotMatch(html,/Astra/);
  assert.doesNotMatch(direct.renderResult(assessment,[frame]),/ChatGPT|Astra/i);
 });
 
@@ -358,11 +356,10 @@ test('actionable review labels preserve saved enums and detailed uncertainty',()
  assert.doesNotMatch(html,/unclear|not enough evidence/i);assert.match(html,/head is obscured/);assert.match(html,/Needs review|needs review/);assert.equal(JSON.stringify(saved),before);
  assert.equal(common.reviewText('rider_association_unclear'),'rider_association_unclear');
 });
-test('every feature documents its actual model and inference limits',()=>{
+test('one-off page removes technical model cards and checkboxes but preserves explicit sharing notice',()=>{
  const html=fs.readFileSync(require.resolve('../web/violation_lens.html'),'utf8');
- assert.equal((html.match(/Model used \/ How it works/g)||[]).length,5);
- for(const model of ['yolo11s.pt','iam-tsr/yolov8n-helmet-detection','iisc-aim/UVH-26','morsetechlab/yolov11-license-plate-detection','EasyOCR 1.7.2'])assert.ok(html.includes(model));
- assert.match(html,/No additional model/);assert.match(html,/training\/test contamination/);
+ assert.doesNotMatch(html,/Model used|YOLO|EasyOCR|UVH-26|type="checkbox"/i);
+ assert.match(html,/Send to LLM/);assert.match(html,/to OpenAI for LLM review/);
 });
 
 test('evidence table rounds displayed scores while retaining exact values and separate observations',()=>{

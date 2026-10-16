@@ -497,7 +497,7 @@ test('failed synthetic demo creation keeps the previous review and provides a re
 test('synthetic demo cannot start during an upload, and upload cancellation releases it', async () => {
   class Upload {constructor(){this.upload={};}open(){}setRequestHeader(){}send(){}abort(){this.onabort();this.onloadend();}}
   const harness=browserHarness(path=>path==='/api/config'?{vehicle_tracking_ready:true,helmet:{ready:true}}:path==='/api/run-library'?{runs:[]}:{available:false},null,{XMLHttpRequest:Upload});
-  await harness.settle();harness.element('clip').files=[{name:'permitted.mp4',size:10}];harness.element('rights').checked=true;harness.element('rights').listeners.change();harness.element('upload').listeners.click();
+  await harness.settle();harness.element('clip').files=[{name:'permitted.mp4',size:10}];harness.element('upload').listeners.click();
   assert.equal(harness.element('demo-run').disabled,true);harness.element('demo-scenario').value='opposing';await harness.element('demo-run').listeners.click();
   assert.ok(!harness.requests.some(r=>r.path==='/api/violation-demo'));harness.element('cancel-upload').listeners.click();assert.equal(harness.element('demo-run').disabled,false);assert.match(harness.element('upload-message').textContent,/cancelled/);
 });
@@ -549,4 +549,12 @@ test('a delayed cancellation acknowledgement cannot replace a completed worker m
   await harness.settle();const cancelling=harness.element('cancel-run').listeners.click();await harness.settle();
   harness.element('refresh-run').listeners.click();await harness.settle();finishCancel({message:'Cancellation requested.'});await cancelling;
   assert.equal(harness.element('run-state').textContent,'Complete');assert.equal(harness.element('run-message').textContent,'Saved evidence ready.');assert.equal(harness.element('cancel-run').hidden,true);
+});
+
+test('connected accounts hide the redundant banner while disconnected accounts can sign in',async()=>{
+ for(const available of [true,false]){
+  const h=browserHarness(path=>path==='/api/violation-llm'?{available,message:'Connection state'}:path==='/api/config'?{}:path==='/api/violation-library'?{runs:[]}:{});await h.settle();
+  assert.equal(h.element('subscription-panel').hidden,available);assert.equal(h.element('connect-chatgpt').hidden,available);
+  if(!available){h.element('connect-chatgpt').listeners.click();assert.equal(h.element('auth-confirmation').hidden,false);}
+ }
 });
