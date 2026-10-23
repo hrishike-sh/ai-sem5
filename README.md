@@ -1,122 +1,71 @@
 # ViolationLens - AI Sem 5
 
-Local traffic evidence review. Upload a permitted image or select a video frame, number people and vehicles locally, preview their boxes and crops, and ask the LLM for findings tied to each subject ID using your ChatGPT plan. Full-clip rule analysis remains optional.
+ViolationLens is a local traffic-image review app. One uploaded image feeds five checks, with editable subject boxes, saved evidence and JSON export. An optional LLM review uses a connected ChatGPT plan only after an explicit send action. Video detection and rule review are available separately.
 
-## Run
+This project integrates pretrained models and evidence checks. Its results are candidates for human review; it does not establish legal violations, identities or fines. Real-world accuracy has not been established.
 
-Install Python 3.11, uv, and FFmpeg (both `ffmpeg` and `ffprobe` on PATH). On Windows:
+## Run on Windows
+
+Prerequisites: Python 3.11, [uv](https://docs.astral.sh/uv/), and FFmpeg with both `ffmpeg` and `ffprobe` on `PATH`. From the repository directory:
 
 ```powershell
 .\Setup-AI.ps1
 .\Start.cmd
 ```
 
-The app runs at http://127.0.0.1:8521. Close its terminal to stop the server. It uses its own `uploads/`, `runs/`, and `.ai-runtime/` directories. `TRAFFIC_AI_HOME` can select another dedicated runtime directory. The retained `ivp/` package supplies shared image processing, media handling, jobs and evidence storage.
+Open **http://127.0.0.1:8521**. Press Ctrl+C in the server terminal to stop it.
 
-## Review workflow
+`Setup-AI.ps1` creates a new `.ai-runtime/venv`, installs `torch==2.11.0+cu128` and `torchvision==0.26.0+cu128` from the CUDA 12.8 wheel index, then installs `requirements-ai.txt`. It refuses to overwrite an existing virtual environment and writes the runtime location to ignored `ai-runtime.json`. It installs dependencies, **not model weights or the optional OCR packages**.
 
-Drop one JPG or PNG, or choose it with the file picker. The same image is uploaded once and automatically processed by the available local features: subject localization, helmet evidence, vehicle-class counts, vehicle subtype proposals, and number plate candidates. Each section shows its own progress, results or failure; a combined report includes successful evidence and pending or unavailable checks. For video, select a timestamp and choose **Upload and preview**. No hosted request runs automatically.
+The CUDA wheel choice does not make every check run on a GPU. Subject detection selects CUDA when available and otherwise uses CPU; helmet, vehicle subtype and plate checks explicitly use CPU. See [configuration and OCR setup](docs/CONFIGURATION.md) and [required weights, provenance and licenses](docs/MODELS.md). Missing weights are shown as unavailable checks.
 
-Inspect the numbered boxes: P IDs represent people and V IDs represent vehicles, not verified riders or identities. Correct missing or wrong boxes by drawing, editing coordinates/type, or deleting them. Manual boxes also work when the subject detector is unavailable; the independent vehicle subtype specialist can still inspect the image. At most twelve subjects are numbered; a truncated detection is visibly reported. Replacing the image clears the visible results and ignores stale responses from the prior image.
+## Review an image
 
-Inspect the exact annotated context and ID-linked crops, then choose **Send to LLM**. This explicit action sends the disclosed images and evidence to OpenAI; uploading alone does not. One context and up to twelve padded crops are sent; each JPEG is bounded to 768 pixels per edge. Crops use the bound original-resolution frame. This uses account-visible `gpt-6-astra` with no silent model substitution or paid API fallback. Source paths and reviewer notes are excluded. These are within-image IDs, not identities or cross-frame tracking.
+Drop a permitted JPG or PNG, or choose it with the file picker. Local processing starts automatically. For MP4, MOV or AVI, choose a timestamp and select **Upload and preview** to review one decoded frame.
 
-The LLM must return every submitted ID once, distinguish riders from pedestrians, and link each apparent rider to a submitted two-wheeler. Each finding cites that subject's own crop and shared context. Possible missing helmet requires a visible uncovered head on an apparent motorcycle rider; an obscured or ambiguous head is unclear. Possible triple riding requires three distinct visible people associated with the same motorcycle, with consistent group references. Zebra occupancy is only an observation. Speed, wrong-way movement, red-light crossing, obstruction and parking legality cannot be established by this single-frame flow. There are no legal citations, fines or determinations of guilt.
+| Check | What it provides |
+| --- | --- |
+| Subject localization | Editable person and vehicle boxes with within-image P/V IDs; at most twelve subjects, with truncation disclosed. |
+| Helmet evidence | Local helmet/no-helmet candidates, raw scores, conflicts and unmatched detections. |
+| Vehicle class counts | Counts of numbered motorcycle, bicycle, car, bus and truck boxes, distinguishing detector proposals from manual corrections. |
+| Vehicle subtype evidence | Separate proposals for fourteen types, including two-wheelers, three-wheelers, hatchbacks and buses. |
+| Plate detection and reading | Candidate plate boxes, English OCR and manual transcription with the original reading retained. |
 
-Review the separate per-ID observations, suspected issues and uncertainty, then save Accept or Reject with a note and export JSON. A status of no visible violation means no supported visible concern was selected, not verified compliance. **Edit boxes** lets you correct a saved assessment; saving changes clears its model result and reviewer decision and requires a fresh preview and consent. Reopening unchanged saved results sends no new model request. Older unnumbered assessments remain readable, but new requests require subject boxes.
+Each check reports its own progress, result or failure. The combined table joins subject IDs, apparent rider associations, plate candidates, observations and review status. An unavailable check is not evidence of compliance. Vehicle counts describe this image, not unique traffic volume.
 
-Expand **Optional local detection and rule review** for the existing local pipeline:
+Inspect the shared image and correct missed or incorrect boxes. Manual boxes work when subject detection is unavailable. P IDs denote people, not confirmed riders or identities; geometric overlap alone does not establish a rider association. Plate candidates attach to a numbered vehicle only when the containment match is unambiguous.
 
-1. Upload a permitted MP4, MOV or AVI clip and run detection. Missing model files are shown as setup requirements.
-2. Open timestamped candidate cards, inspect recorded facts and missing context, and load before/during/after frames. Frame timestamps are actual decoded positions; unavailable frames are labeled.
-3. Accept or reject a candidate with an optional note, then export the local review JSON. Human decisions are stored separately from the original algorithm output and are invalidated if that output changes.
+Local evidence can be exported without an LLM request. Saved image reviews can be reopened from the page. After an LLM assessment, record **Accept assessment** or **Reject assessment** and an optional note; that decision is stored separately. Saving box changes, rerunning specialist checks or correcting a plate clears the previous LLM assessment and reviewer decision. Inspect the updated previews before sending again. Reopening unchanged saved results does not trigger another model request.
 
-For a short walkthrough, see the [demo guide](docs/DEMO.md). Optional ChatGPT explanations are described below; the review workflow also works without them.
+## Optional LLM review
 
-For a repeatable demonstration, expand **Try a synthetic rule demo** and choose opposing motion, following motion, or unknown direction. The app generates a labeled three-second rectangle animation and evaluates its known coordinates with the existing geometric rule engine. This works without detector weights or ChatGPT. It demonstrates configured-rule checks, evidence frames, saved human decisions and export; it is not learned detection or a real-traffic benchmark.
+Choose **Connect ChatGPT**, approve sign-in, then inspect the exact outbound images before selecting **Send to LLM**. Connecting or uploading alone does not send evidence to OpenAI.
 
-The optional deterministic pipeline prioritizes explicit bare-head evidence and wrong-way movement with independent direction context. A missing helmet detection alone is insufficient. Red-signal cases require an associated signal and temporal context; zebra occupancy alone does not establish prohibited obstruction. Its automatic triple-riding rule remains deferred; the numbered LLM review offers a separate fallible visual assessment. `supported`, `needs_review` and `insufficient_evidence` describe evidence, not guilt or fines. There is no automatic external reporting.
+The image review sends one annotated context image and up to twelve padded subject crops, each bounded to 768 pixels per edge, with subject identifiers and bound local evidence. Crops use the original selected frame. Reviewer notes, source paths, OCR strings and manual plate transcriptions are excluded from the text payload. Faces and plate pixels may remain visible in the approved images; metadata removal and cropping do not guarantee anonymity.
 
-The advanced detection and overview interface remains available at `/studio`. Saved results and uploads stay in this repository's local runtime directories.
+The implementation requests `gpt-6-astra`, with no silent model substitution or paid API fallback. Account access and plan limits must be checked after authorization. The separate app grant is encrypted with Windows DPAPI outside the repository. See [authentication and request details](docs/CONFIGURATION.md#chatgpt-connection).
 
-## Local specialist evidence
+The assessment ties observations and uncertainty to each submitted subject. A possible missing-helmet issue needs supported local no-helmet evidence and a visible association with the same motorcycle. Missing detections and ambiguous heads remain uncertain. A three-rider suspicion needs three distinct visible people associated with one motorcycle. A model score alone never creates a violation.
 
-After boxes are numbered or corrected, the app runs the pinned `iam-tsr/yolov8n-helmet-detection` checkpoint locally on the original selected frame. Its actual classes are **With Helmet** and **Without Helmet**. Each matched person card shows the raw model score and any competing predictions. Scores are not calibrated probabilities or measured accuracy. A heuristic 0.50 threshold distinguishes candidates from low-confidence predictions; conflicting classes, overlapping person matches, missing detections and unavailable weights remain explicit. A missing detection never establishes no helmet. Person-to-motorcycle overlaps are unconfirmed geometric candidates, not verified rider identities.
+## Optional video workflow
 
-The checkpoint was trained at image size 224; this app uses full-context CPU inference at size 960 to retain small heads. Local checks showed strong scale sensitivity and duplicate predictions. Duplicates do not create additional people or vehicle counts. The accompanying **vehicle breakdown** counts numbered motorcycle, bicycle, car, bus and truck boxes in this image, distinguishing detector proposals from manual corrections and displaying any twelve-subject truncation. It is not a unique traffic-volume measurement.
+Expand **Optional local detection and rule review** to upload a clip, run the existing detector pipeline and inspect timestamped candidates with before/during/after frames. Save accept/reject decisions and export the review JSON. Decisions are invalidated if the underlying algorithm output changes.
 
-The LLM receives the exact previews plus these bound local predictions. It cannot replace scores or turn absent/uncertain evidence into a missing-helmet issue. A suspected missing-helmet observation additionally needs a supported local no-helmet prediction and a visible rider association to the same motorcycle. Local evidence can be exported without an LLM request. Correcting boxes clears both local evidence and the previous LLM assessment; the specialist reruns before another send.
+**Try a synthetic rule demo** generates a labeled three-second rectangle animation for opposing, following or unknown direction. It exercises configured geometry, evidence frames, decisions and export without detector weights or ChatGPT. It is not a real-traffic benchmark. The advanced detection and scene-overview interface is at **http://127.0.0.1:8521/studio**. See the [demo guide](docs/DEMO.md) for walkthroughs and recorded checks.
 
-Two real local samples were inspected without hosted transmission. The flyover frame contained a raw no-helmet false candidate on a billboard and a helmet candidate on a rider. The supplied rider image produced overlapping head detections and a low-score conflicting class. These are useful failure cases, not a labeled accuracy benchmark. The existing `yahyagul/traffic-sign-yolov8` checkpoint returned no candidates on the two samples or a synthetic sign probe, so sign/signal recognition was not added to the primary workflow. No plate detector or OCR quality was established.
+## Limits and recorded checks
 
-Model cards label the [helmet checkpoint](https://huggingface.co/iam-tsr/yolov8n-helmet-detection) and [sign checkpoint](https://huggingface.co/yahyagul/traffic-sign-yolov8) repositories MIT; the helmet card's linked dataset is labeled CC BY 4.0. These labels do not settle derivative obligations. [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11/) uses AGPL-3.0 or Enterprise terms. Weights remain external to this repository.
+A single image cannot establish speed, permitted travel direction, red-light crossing, obstruction or parking legality. Zebra occupancy is an observation. The optional video rules need independent direction, signal and temporal context; unknown context remains explicit. Automatic triple-riding detection in that rule pipeline remains deferred. There is no owner lookup or automatic external reporting.
 
-The additional [IISc UVH-26](https://huggingface.co/iisc-aim/UVH-26) YOLOv11-S specialist proposes fourteen vehicle types: Hatchback, Sedan, SUV, MUV, Bus, Truck, Three-wheeler, Two-wheeler, LCV, Mini-bus, tempo-traveller, bicycle, Van and Others. It uses the original selected image at its training size of 640 pixels. Raw scores below 0.50 remain low-confidence evidence; qualifying proposal counts are separate from numbered-box counts. Subtypes and geometric matches remain candidates, and unmatched or conflicting predictions are visible. The supplied flyover frame produced seven qualifying proposals; the rider image produced two, missing other visible vehicles. A false Three-wheeler proposal at 0.497 was below the threshold. At 960 pixels the model produced worse subtype confusions in these checks, so that setting was not adopted. These two samples establish feasibility, not accuracy.
+The small local checks exposed missed vehicles, helmet false positives and conflicting predictions. On two real samples, plate crops produced incorrect, incomplete or low-confidence OCR; neither became an accepted reading. A synthetic text fixture was transcribed correctly but stayed below the heuristic 0.80 OCR threshold. Three four-second real-video runs produced zero supported candidates. These checks demonstrate execution and withholding behavior, not accuracy, recall or proof that every event was found. Raw scores are not calibrated probabilities. Details are retained in [model notes](docs/MODELS.md#recorded-local-checks).
 
-The optional UVH weight file is `models/uvh26-yolo11s-4a224127.pt`, or the ignored `ai-runtime.json` `models.vehicle_types` path. It must match revision `4a22412775adb6f97f22735647afee976b4638a0`, SHA-256 `12dbeb8f6fa207d19446fa652fc4313359fbec267027c8c01641004dcf1d0150` (57,142,241 bytes). The [official file](https://huggingface.co/iisc-aim/UVH-26/blob/4a22412775adb6f97f22735647afee976b4638a0/weights/YOLOv11-S/UVH-26-MV-YOLOv11-S.pt) hash was checked before local use. The repository card declares Apache 2.0 and explicitly retains upstream Ultralytics AGPLv3 obligations. See the authors' [technical report](https://arxiv.org/abs/2511.02563). No weights are redistributed or downloaded automatically by this feature.
+## Files and development
 
-## Local number plate evidence
+Uploads, saved video runs, saved image reviews and temporary previews live in repository-local `uploads/`, `runs/`, `direct-reviews/` and `temp/`. `.ai-runtime/` holds the default interpreter, weights and caches. `TRAFFIC_AI_HOME` changes the model runtime location, not those saved-evidence folders. Private media, credentials, cached weights and generated results are ignored and are not bundled.
 
-The fifth feature uses [Morse Tech Lab's YOLO11n plate detector](https://huggingface.co/morsetechlab/yolov11-license-plate-detection) and [EasyOCR English recognition](https://github.com/JaidedAI/EasyOCR). Detection and OCR run locally. Boxes are associated only with a uniquely containing numbered vehicle; overlapping or unmatched candidates stay unassigned. Small, unreadable and low-confidence readings remain uncertain. A plate cannot establish an offense, registration validity, an owner's identity, or a vehicle's history. There is no database lookup.
+`web/` contains the browser UI, `web_server.py` serves it, and `traffic_ai/` contains the review and model adapters. The retained `ivp/` package supplies shared image processing, media handling, jobs and evidence storage. There is no frontend bundler or deployment configuration. Advanced utilities in `scripts/` have their own input requirements; historical validation utilities may require external fixtures that are not bundled.
 
-The evidence table joins subject IDs, apparent rider associations, candidate plates, observations, supported suspicions, raw model scores and reviewer status. Shared rider-group concerns appear once on the motorcycle row. Missing helmet and three-rider suspicions still need the existing visible-evidence checks; zebra occupancy is an observation, and speed, signal crossing and wrong-way movement need additional temporal/context evidence. A local model score alone does not create a violation.
-
-In **Number plate evidence**, inspect the source boxes and raw OCR. A manual transcription is attached to one detected plate and vehicle, retains the original OCR, and clears any old LLM assessment and reviewer decision. Corrections, original predictions and the combined table persist in JSON exports and saved reviews. OCR strings and manual transcriptions are not added to the LLM text payload; plate pixels may remain visible in images you explicitly approve sending to OpenAI.
-
-Optional recognition dependencies can be installed beside the base environment without replacing its PyTorch or OpenCV packages:
-
-```powershell
-uv pip install --python .\.ai-runtime\venv\Scripts\python.exe --target .\.ai-runtime\site-packages --no-deps -r requirements-ocr.txt
-```
-
-Use the configured dedicated runtime paths if they differ from the defaults. Supply these files under that runtime's `models/plates/` directory; the app checks their hashes before loading and never downloads missing plate weights automatically:
-
-| File | Official source | SHA-256 |
-| --- | --- | --- |
-| `detector.pt` | [Pinned YOLO11n checkpoint](https://huggingface.co/morsetechlab/yolov11-license-plate-detection/resolve/251a30d7daedca065f56e04b0af04052c907c68f/license-plate-finetune-v1n.pt) | `0aec75976c56eb6f26dfb274c430620ec65137915ff1ae47c3a48c7af8afb7b2` |
-| `english_g2.pth` | Extract this exact file from [EasyOCR's official archive](https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/english_g2.zip) | `e2272681d9d67a04e2dff396b6e95077bc19001f8f6d3593c307b9852e1c29e8` |
-
-The detector is AGPL-3.0; EasyOCR is Apache-2.0. The detector publisher warns of training/test contamination, so its published metrics are not a reliable field estimate. No weights are distributed here. On the two supplied local samples, detected plate crops produced low-confidence, incorrect or incomplete OCR; neither became an accepted reading. A clearly labeled, high-resolution synthetic text fixture was transcribed exactly but still scored below the conservative 0.80 threshold. This verifies execution and uncertainty handling, not real-world recognition accuracy.
-
-## Optional ChatGPT plan explanation
-
-The Windows prototype implements the official [Sign in with ChatGPT flow for locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source/sign-in). In the review page, choose **Connect ChatGPT** and explicitly approve opening sign-in to authorize ViolationLens. This creates a separate app grant; it does not reuse Codex or browser credentials. The grant is encrypted with Windows DPAPI under `%LOCALAPPDATA%/ViolationLens/auth`, outside the repository. Installing dependencies or opening the page does not authorize access.
-
-After sign-in, each card offers two explicit choices:
-
-- **Preview frames and facts for ChatGPT** prepares the exact images and structured evidence locally. Inspect that preview, then choose **Send selected frames and facts to ChatGPT** to send it. A request contains at most three JPEG images, each at most 768 pixels on its longest edge. Preparation may include context images and subject crops; the full clip is not sent. JPEG metadata is stripped, but crops or blur do not guarantee anonymity, and identities may remain visible.
-- **Send structured facts only to ChatGPT** sends the card's canonical evidence labels and values, rule/status, identifiers, and missing context without images. This remains an explicit choice when images are unavailable; a failed image request does not silently switch to facts-only.
-
-Reviewer notes and source paths are excluded from both requests. The adapter queries models available to the connected account and accepts completed structured responses tied to the supplied evidence IDs. The factual explanation uses saved canonical facts and retains missing-fact warnings. Image observations appear separately as fallible model interpretations; they do not change recorded findings or establish speed, permitted direction, identity, guilt, or a legal violation.
-
-Successful explanations are saved with the original evidence fingerprint and included in the review export. Reopening a run shows **Saved explanation**, its image descriptors, and any model observations. Reloading does not send the evidence again or run new inference. Sending new image evidence requires a current exact preview and another explicit send action.
-
-The app uses ChatGPT plan usage and has no paid API fallback. Account eligibility, available models and a live inference request must be verified after authorization. Offline tests use clearly labeled mock grants and responses; they do not demonstrate live access. Usage and limits are managed in [ChatGPT settings](https://chatgpt.com/settings/usage). A failed or incomplete stream produces an error, not a fabricated explanation.
-
-## Models
-
-Dependencies do not include model weights. Supply weights you are authorized to use under the runtime directory:
-
-| Model | Location | SHA-256 |
-| --- | --- | --- |
-| Ultralytics YOLO11s | `models/yolo11s.pt` | `85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5` |
-| `iam-tsr/yolov8n-helmet-detection`, revision `59b68b03b60314badb0c19ebcc3b95baa8241cf8` | `huggingface/hub/models--iam-tsr--yolov8n-helmet-detection/snapshots/59b68b03b60314badb0c19ebcc3b95baa8241cf8/best.pt` | `c8eb324e365cf4faeab491d9cc301535ec745171b55e8b1acadea62be5101a9d` |
-
-The detector checks these fingerprints before loading. The full analyzer also uses pinned Grounding DINO, segmentation and sign-recognition models; their identifiers and revisions are in `traffic_ai/scene.py`, `segmentation.py`, `signs.py`, and `turn_signs.py`. Each model and dependency retains its upstream licensing terms; no model license is granted here. In particular, [SegFormer's license](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) limits use to noncommercial research or evaluation. Ultralytics dependencies and YOLO-derived checkpoints also require review of their upstream terms before redistribution.
-
-To reuse an existing local interpreter and weights without copying them, create ignored `ai-runtime.json` with absolute local paths. Keep `home` set to an existing dedicated directory for this app. Optional fields are `python`, `models` (keys `road_users`, `helmet`, `turn_sign`, `vehicle_types`), and `pretrained_snapshots` (model ID mapped to `{ "revision": "<pinned commit>", "path": "<local snapshot directory>" }`). Set `isolate_caches: true` and `offline: true` to keep generated caches under `home` and prevent model downloads. Referenced model files and snapshots are read only. The default setup can download missing auxiliary models unless offline mode is enabled.
-
-Scene overview is optional and uses the bounded CPU runtime specified by `VisionConfig` in `traffic_ai/bounded_vision.py`, under `.ai-runtime/ollama/`. Without those local files it reports unavailable. Detection remains separate from this overview.
-
-## Scope
-
-Detection covers road users and helmets, with tracking and evidence-based assessments for nine traffic-rule categories. Saved results include media, individual decisions, event evidence and source-coordinate information. Unknown context remains `cannot_assess`. General real-traffic accuracy and fully automatic signal/sign applicability have not been established. Scene overview categories are unverified and do not determine violations.
-
-Three actual four-second runs on permitted real footage produced **zero supported candidates**. Raw detections included a billboard face mistaken for an unhelmeted head and a car region mistaken for a helmet; association and rule checks did not promote those detections to supported violations. These small checks illustrate limitations and withholding behavior, not an accuracy benchmark or proof that every event was found.
-
-Provide your own permitted image or video. No demo media, private uploads, cached weights, credentials or generated results are bundled.
-
-## Development
+For the default environment:
 
 ```powershell
 .\.ai-runtime\venv\Scripts\python.exe -m pytest
@@ -124,4 +73,4 @@ node --test tests/*.test.cjs
 .\.ai-runtime\venv\Scripts\python.exe -m compileall -q ivp traffic_ai web_server.py launch.py
 ```
 
-The Python suite generates its own media fixtures. Model calls are stubbed in the automated suite; running it does not establish model accuracy. There is no frontend bundler or deployment configuration.
+Use the configured interpreter if it differs; the browser tests require Node.js. Regression coverage uses generated media fixtures and mocked model responses, alongside runtime and readiness checks. Passing tests verifies software behavior, not model accuracy or live ChatGPT access.
